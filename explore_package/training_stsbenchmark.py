@@ -12,7 +12,7 @@ python training_nli.py pretrained_transformer_model_name
 """
 from torch.utils.data import DataLoader
 import math
-from sentence_transformers import SentenceTransformer,  LoggingHandler, losses, models, util
+from sentence_transformers import SentenceTransformer, LoggingHandler, losses, models, util
 from sentence_transformers.evaluation import EmbeddingSimilarityEvaluator
 from sentence_transformers.readers import InputExample
 import logging
@@ -30,22 +30,20 @@ logging.basicConfig(format='%(asctime)s - %(message)s',
 #### /print debug information to stdout
 
 
-
-#Check if dataset exsist. If not, download and extract  it
+# Check if dataset exsist. If not, download and extract  it
 sts_dataset_path = 'datasets/stsbenchmark.tsv.gz'
 
 if not os.path.exists(sts_dataset_path):
     util.http_get('https://sbert.net/datasets/stsbenchmark.tsv.gz', sts_dataset_path)
 
-
-
-#You can specify any huggingface/transformers pre-trained model here, for example, bert-base-uncased, roberta-base, xlm-roberta-base
+# You can specify any huggingface/transformers pre-trained model here, for example, bert-base-uncased, roberta-base, xlm-roberta-base
 model_name = sys.argv[1] if len(sys.argv) > 1 else 'distilbert-base-uncased'
 
 # Read the dataset
 train_batch_size = 16
 num_epochs = 4
-model_save_path = 'output/training_stsbenchmark_'+model_name.replace("/", "-")+'-'+datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+model_save_path = 'output/training_stsbenchmark_' + model_name.replace("/", "-") + '-' + datetime.now().strftime(
+    "%Y-%m-%d_%H-%M-%S")
 
 # Use Huggingface/transformers model (like BERT, RoBERTa, XLNet, XLM-R) for mapping tokens to embeddings
 word_embedding_model = models.Transformer(model_name)
@@ -77,19 +75,15 @@ with gzip.open(sts_dataset_path, 'rt', encoding='utf8') as fIn:
         else:
             train_samples.append(inp_example)
 
-
 train_dataloader = DataLoader(train_samples, shuffle=True, batch_size=train_batch_size)
 train_loss = losses.CosineSimilarityLoss(model=model)
-
 
 logging.info("Read STSbenchmark dev dataset")
 evaluator = EmbeddingSimilarityEvaluator.from_input_examples(dev_samples, name='sts-dev')
 
-
 # Configure the training. We skip evaluation in this example
-warmup_steps = math.ceil(len(train_dataloader) * num_epochs  * 0.1) #10% of train data for warm-up
+warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1)  # 10% of train data for warm-up
 logging.info("Warmup-steps: {}".format(warmup_steps))
-
 
 # Train the model
 model.fit(train_objectives=[(train_dataloader, train_loss)],
@@ -98,7 +92,6 @@ model.fit(train_objectives=[(train_dataloader, train_loss)],
           evaluation_steps=1000,
           warmup_steps=warmup_steps,
           output_path=model_save_path)
-
 
 ##############################################################################
 #

@@ -1,0 +1,29 @@
+{
+    "fine-tune": {
+        "eg_sbert": {
+            "dataset_name": "stsb_multi_mt",
+            "embedding_model_name": "bert-base-uncased",
+            "max_seq_length": 256,
+            "batch_size": 16,
+            "n_epochs": 4,
+            "warmup_frac": 0.1,
+            "pooling_model_kwargs": {
+                "pooling_mode_mean_tokens": true
+            }
+        }
+    },
+    "datasets": {
+        "stsb_multi_mt": {
+            "n_sample": {
+                "train": 5749,
+                "dev": 1500,
+                "test": 1379
+            },
+            "label_range": {
+                "min": 0,
+                "max": 5
+            }
+        }
+    },
+    "random-seed": 77
+}
