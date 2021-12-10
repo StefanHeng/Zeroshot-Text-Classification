@@ -2,6 +2,7 @@
 .vscode/
 .DS_Store
 datasets/
+models/
 
 
 # Byte-compiled / optimized / DLL files

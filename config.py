@@ -3,7 +3,7 @@ import os
 from data_path import *
 
 
-STSb = 'stsb_multi_mt'
+STSb = 'stsb_multi_mt'  # Per Hugging Face
 config = {
     'fine-tune': dict(
         eg_sbert=dict(  # Per *Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*, section 4.2
@@ -12,6 +12,7 @@ config = {
             max_seq_length=256,
             batch_size=16,
             n_epochs=4,
+            n_eval=100,  # Total number of evaluations during training
             warmup_frac=0.1,
             pooling_model_kwargs=dict(pooling_mode_mean_tokens=True)
         )

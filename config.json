@@ -6,6 +6,7 @@
             "max_seq_length": 256,
             "batch_size": 16,
             "n_epochs": 4,
+            "n_eval": 100,
             "warmup_frac": 0.1,
             "pooling_model_kwargs": {
                 "pooling_mode_mean_tokens": true
