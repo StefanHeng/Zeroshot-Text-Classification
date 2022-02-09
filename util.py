@@ -1,5 +1,6 @@
-import json
 import os
+import sys
+import json
 from functools import reduce
 from datetime import datetime
 
@@ -15,6 +16,14 @@ from data_path import *
 
 rcParams['figure.constrained_layout.use'] = True
 sns.set_style('darkgrid')
+
+
+def get_python_version():
+    vi = sys.version_info
+    return dict(
+        major=vi[0],
+        minor=vi[1]
+    )
 
 
 def get(dic, ks):
@@ -77,7 +86,14 @@ def plot_points(arr, **kwargs):
         marker='.', lw=0.5, ms=1,
         c='orange',
     )
-    plt.plot(arr[:, 0], arr[:, 1], **(kwargs_ | kwargs))
+    kwargs = {**kwargs_, **kwargs}  # Support versions below 3.9
+    # vers = get_python_version()
+    # assert vers['major'] == 3
+    # if vers['minor'] < 9:
+    #     kwargs = {**kwargs_, **kwargs}
+    # else:
+    #     kwargs = kwargs_ | kwargs
+    plt.plot(arr[:, 0], arr[:, 1], **kwargs)
 
 
 if __name__ == '__main__':
