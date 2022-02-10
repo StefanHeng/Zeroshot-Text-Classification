@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import math
+from typing import Union
 from functools import reduce
 from datetime import datetime
 
@@ -72,6 +74,17 @@ def now(as_str=True):
     return d.strftime('%Y-%m-%d %H:%M:%S') if as_str else d
 
 
+def fmt_num(n: Union[float, int]):
+    """
+    Convert number to human-readable format, in e.g. Thousands, Millions
+    """
+    if not hasattr(fmt_num, 'posts'):
+        fmt_num.posts = ['', 'K', 'M', 'B', 'T']
+    n = float(n)
+    idx_ = max(0, min(len(fmt_num.posts) - 1, int(math.floor(0 if n == 0 else math.log10(abs(n)) / 3))))
+    return '{:.0f}{}'.format(n / 10 ** (3 * idx_), fmt_num.posts[idx_])
+
+
 def get_torch_device():
     return 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -100,3 +113,6 @@ if __name__ == '__main__':
     from icecream import ic
 
     ic(config('fine-tune'))
+
+    ic(fmt_num(124439808))
+

@@ -4,6 +4,7 @@
 datasets/
 models/
 test_lang*
+examples/
 
 
 # Byte-compiled / optimized / DLL files
