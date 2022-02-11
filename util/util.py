@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-from data_path import *
+from .data_path import *
 
 
 rcParams['figure.constrained_layout.use'] = True
@@ -64,7 +64,7 @@ def config(attr):
     Loads the config file on first call.
     """
     if not hasattr(config, 'config'):
-        with open(os.path.join(PATH_BASE, DIR_PROJ, 'config.json'), 'r') as f:
+        with open(os.path.join(PATH_BASE, DIR_PROJ, 'util', 'config.json'), 'r') as f:
             config.config = json.load(f)
     return get(config.config, attr)
 
