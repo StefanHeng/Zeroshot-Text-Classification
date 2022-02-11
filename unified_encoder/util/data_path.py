@@ -7,7 +7,7 @@ paths = paths[:paths.index('util')]
 #   e.g.: '/Users/stefanh/Documents/UMich/Research/Clarity Lab/Unified Encoder'
 PATH_BASE = os.sep.join(paths[:-2])  # System data path
 # Repo root folder name with package name; e.g.: ''Unified-Encoder/unified-encoder''
-DIR_PROJ = os.sep.join(paths[-2:])
+DIR_PROJ = paths[-2]
 PKG_NM = paths[-1]  # Package/Module name
 
 DIR_MDL = 'models'  # Save models

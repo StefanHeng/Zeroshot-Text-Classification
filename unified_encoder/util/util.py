@@ -63,7 +63,7 @@ def config(attr):
     Loads the config file on first call.
     """
     if not hasattr(config, 'config'):
-        with open(os.path.join(PATH_BASE, DIR_PROJ, 'util', 'config.json'), 'r') as f:
+        with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'r') as f:
             config.config = json.load(f)
     return get(config.config, attr)
 
@@ -82,6 +82,11 @@ def fmt_num(n: Union[float, int]):
     n = float(n)
     idx_ = max(0, min(len(fmt_num.posts) - 1, int(math.floor(0 if n == 0 else math.log10(abs(n)) / 3))))
     return '{:.0f}{}'.format(n / 10 ** (3 * idx_), fmt_num.posts[idx_])
+
+
+def model_param_size(m: torch.nn.Module, as_str=True) -> Union[int, str]:
+    num = sum(p.numel() for p in m.parameters())
+    return fmt_num(num) if as_str else num
 
 
 def get_torch_device():
