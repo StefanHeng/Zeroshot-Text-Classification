@@ -1,5 +1,3 @@
-import os
-
 from data_path import *
 
 
