@@ -1,26 +1,39 @@
-from typing import Callable
+from typing import List, Callable
 
 import transformers
-from transformers import AutoTokenizer, AutoModel, AutoConfig, GPT2Model
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer, AutoModel, AutoConfig, GPT2Model, GPT2TokenizerFast
+# Head for training
+from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig, GPT2LMHeadModel, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments, SchedulerType
-from datasets import load_dataset
+from transformers import DataCollatorForLanguageModeling, default_data_collator
+from datasets import load_dataset, Dataset
+
+from unified_encoder.util import *
 
 
-def get_dset(dnm='ag_news', map_func: Callable = None, n_sample=1000, random_seed: int = None):
+def get_dset(
+        dnm='ag_news',
+        map_func: Callable = None, remove_columns: Union[str, List[str]] = None,
+        n_sample: int = None, random_seed: int = None
+) -> tuple[Dataset, ...]:
     dset = load_dataset(dnm)
     ic(dset, len(dset))
     ic(dset['train'][0])
-    if n_sample:
-        dset.select(range(n_sample))
+    tr, vl = dset['train'], dset['test']
+    if n_sample is not None:
+        tr = tr.select(range(n_sample))
+        vl = vl.select(range(n_sample))
     if map_func is not None:
-        dset = dset.map(map_func, batched=True)
-    tr, val = dset['train'], dset['test']
+        tr = tr.map(map_func, batched=True, remove_columns=remove_columns)
+        vl = vl.map(map_func, batched=True, remove_columns=remove_columns)
     if random_seed:
-        tr, val = tr.shuffle(seed=random_seed), val.shuffle(seed=random_seed)
-    return tr, val
+        tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
+        ic(tr, vl)
+    return tr, vl
 
 
-def get_model_n_tokenizer(name='gpt2'):
+def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2Model, GPT2TokenizerFast]:
     """
     :param name: Model name, one of [`debug`, `gpt2`, `gpt2-medium`]
     """
@@ -29,17 +42,16 @@ def get_model_n_tokenizer(name='gpt2'):
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
         n_token = 64
-        # ic(config)
         conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=4))
-        ic(conf)
+        # ic(conf)
         # exit(1)
-        model_ = GPT2Model(config=conf)
-        ic(model_)
+        model_ = GPT2LMHeadModel(config=conf)
+        # ic(model_)
     else:
         model_nm = MODEL_NMS['small']  # TODO: reduce max seq len to 512 as in paper
         model_ = AutoModel.from_pretrained(model_nm)
         n_token = conf.n_positions
-        ic(model_)
+        # ic(model_)
 
     tokenizer_ = AutoTokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
     SPEC_TOKS = ['<|question|>', '<|text|>', '<|answer|>']
@@ -48,8 +60,13 @@ def get_model_n_tokenizer(name='gpt2'):
     return model_, tokenizer_
 
 
-def get_training_args(name='gpt2') -> TrainingArguments:
+def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLanguageModeling]:
     D_TRAIN_ARGS = {
+        'debug': dict(
+            learning_rate=3e-5,
+            batch_size=4,
+            weight_decay=1e-2
+        ),
         'gpt2': dict(
             learning_rate=3e-5,
             batch_size=32,
@@ -69,7 +86,11 @@ def get_training_args(name='gpt2') -> TrainingArguments:
         evaluation_strategy='steps',
         per_device_train_batch_size=bsz,
         per_device_eval_batch_size=bsz,
-        # TODO: Adam's beta1, beta2, epsilon, what values were used???
+        # Adam's beta1, beta2, epsilon taken from
+        # https://github.com/huggingface/transformers/blob/master/examples/pytorch/language-modeling/run_clm.py
+        adam_beta1=0.9,
+        adam_beta2=0.999,
+        adam_epsilon=1e-08,
         max_grad_norm=1,
         num_train_epochs=1,
         lr_scheduler_type=SchedulerType.COSINE,
@@ -78,7 +99,7 @@ def get_training_args(name='gpt2') -> TrainingArguments:
         logging_steps=1,
         fp16=torch.cuda.is_available(),  # TODO: dynamic loss scaling??
         optim='adamw_torch'
-    )
+    ), DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
 
 if __name__ == '__main__':
@@ -86,22 +107,38 @@ if __name__ == '__main__':
 
     from unified_encoder.util import *
 
+    # from transformers import AutoModelForCausalLM
+    # ic(AutoModelForCausalLM.from_pretrained('gpt2'))
+    # exit(1)
+
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    model, tokenizer = get_model_n_tokenizer('debug')
-    exit(1)
-    train_args = get_training_args()
+    nm = 'debug'
+    model, tokenizer = get_model_n_tokenizer(nm)
+    train_args, data_collator = get_train_setup(nm)
 
     def tokenize_func(sample):
-        return tokenizer(sample['text'], padding='max_length', truncation=True)
-    dset_tr, dset_val = get_dset(map_func=tokenize_func, n_sample=128, random_seed=seed)
-    # dset_tok = dset_tok.remove_columns('label')  # For autoregressive learning
+        ret = tokenizer(sample['text'], padding='max_length', truncation=True)
+        ret['labels'] = ret['input_ids'].copy()
+        # ic(ret)
+        # exit(1)
+        return ret
+    dset_tr, dset_vl = get_dset(map_func=tokenize_func, remove_columns=['label', 'text'], n_sample=16, random_seed=seed)
+    # ic(dset_tr, type(dset_vl))
+
+    # dl = DataLoader(dset_tr)
+    # for i in dl:
+    #     ic(i)
+    #     exit(1)
+    # ic(data_collator.torch_call(list(dset_tr[:2])))
 
     trainer = Trainer(
         model=model,
         args=train_args,
+        # data_collator=data_collator,
+        data_collator=default_data_collator,
         train_dataset=dset_tr,
-        eval_dataset=dset_val
+        eval_dataset=dset_vl
     )
     trainer.train()
