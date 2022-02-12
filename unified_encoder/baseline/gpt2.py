@@ -41,10 +41,9 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
 
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
-        n_token = 16
-        conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=12))
-        # ic(conf)
-        # exit(1)
+        n_token = 8
+        conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=24, n_embd=12*8, n_head=12))
+        ic(conf)
         model_ = GPT2LMHeadModel(config=conf)
         # ic(model_)
     else:
@@ -63,10 +62,10 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
 def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLanguageModeling]:
     D_TRAIN_ARGS = {
         'debug': dict(
-            learning_rate=5e-4,
+            learning_rate=1e-1,
             batch_size=4,
             weight_decay=1e-2,
-            num_train_epochs=4,
+            num_train_epochs=8,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -133,7 +132,6 @@ class MyLoggingCallback(TrainerCallback):
         handler.setFormatter(MyFormatter())
         self.logger.addHandler(handler)
 
-        self.log_count = 0
         self.out_dict: Dict = None
         self.parent_trainer = trainer
         self.called_val_init = False
@@ -149,72 +147,67 @@ class MyLoggingCallback(TrainerCallback):
 
     def on_log(self, args, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
-            # if 'epoch' in d:
-            #     keys_ = ('step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
-            # else:
-            #     keys_ = ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
-            # assert all(k in d for k in ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc'))
             keys_ = ['step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc']
-            fmt = [':>6', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
+            fmt = [':>4', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
+            s_fmts = [f'{{{k}{fmt_}}}' for k, fmt_ in zip(keys_, fmt)]  # Enforce ordering
 
             d = {k: (('loss' in k and round(v, 4)) or ('acc' in k and round(v*100, 4)) or v) for k, v in d.items()}
-            # s_fmt = ', '.join(f'{k}={{{k}}}' for k in keys_ if k in d)  # Enforce ordering
-            s_fmts = [f'{{{k}{fmt_}}}' for k, fmt_ in zip(keys_, fmt) if k in d]
             s_outs = [(k, fmt_.format(**{k: d[k]})) for fmt_, k in zip(s_fmts, keys_) if k in d]
-            # ic(s_outs)
-            # d = {k: logi(v) for k, v in d.items()}
-            # return s_fmt.format(**d)
             return ', '.join(f'{k}={logi(s)}' for (k, s) in s_outs)
 
         if state.is_local_process_zero:
-            self.log_count += 1
-            # ic(logs, state.global_step, state.epoch)
-            step = state.global_step
-            if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
-                if step == 0:  # Before model runs, initial call
-                    if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
-                        self.called_val_init = True
-                        tr_acc, tr_loss, n_ep = (logs.get(k, None) for k in ('acc', 'loss', 'epoch'))
+            if self.mode == 'train':
+                step = state.global_step
+                if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
+                    if step == 0:  # Before model runs, initial call
+                        if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
+                            self.called_val_init = True
+                            tr_acc, tr_loss, n_ep = (logs.get(k, None) for k in ('acc', 'loss', 'epoch'))
 
-                        # Other `on_log` calls invoked inside `evaluate` ignored
-                        out: Dict = self.parent_trainer.evaluate()
-                        n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in ('epoch', 'eval_accuracy', 'eval_loss'))
-                        assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
-                        assert n_ep == n_ep_
-                        # Training step in range (1, total steps); Epoch troublesome to calculate TODO
-                        # Prep for Trainer internal evaluation call
-                        self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
-                        self.logger.info(out_dict2str(self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)))
-                else:  # Need to look for the accuracy calculated for the training batch
-                    acc, loss = logs.get('acc', None), logs.get('loss', None)
-                    assert acc is not None and loss is not None
-                    if self.out_dict is None:  # Heuristic: 1st call to `compute_loss` corresponds to training
-                        # Now is the 1st call, after logging for last batch completes
-                        self.out_dict = dict(step=step, train_acc=acc, train_loss=loss)
-            elif 'loss' in logs:  # Internal training log
-                # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
-                # But log anyway, for after gradient update, evaluation loss changes
-                tr_loss, lr, n_ep = (logs.get(k, None) for k in ('loss', 'learning_rate', 'epoch'))
-                assert all(elm is not None for elm in (tr_loss, lr, n_ep))
-                tr_loss_compute = self.out_dict.get('train_loss', None)
-                # Without overriding `_maybe_log_save_evaluate`, can only get the training loss with 4 decimal place
-                assert round(tr_loss_compute, 4) == tr_loss
-                # See Trainer.train(); compute_loss executes before step increments
-                assert self.out_dict['step'] == step-1  # Override step & loss
-                self.out_dict.update(dict(step=step, train_loss=tr_loss, lr=lr, epoch=n_ep))
-            elif 'eval_loss' in logs:
-                if step != 0:
-                    vl_loss, vl_acc, n_ep_ = (logs.get(k, None) for k in ('eval_loss', 'eval_accuracy', 'epoch'))
-                    assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
-                    assert step == self.out_dict['step']
-                    if self.mode == 'train':
+                            # Other `on_log` calls invoked inside `evaluate` ignored
+                            out: Dict = self.parent_trainer.evaluate()
+                            n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in ('epoch', 'eval_accuracy', 'eval_loss'))
+                            assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
+                            assert n_ep == n_ep_
+                            # Training step in range (1, total steps); Epoch troublesome to calculate TODO
+                            # Prep for Trainer internal evaluation call
+                            self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
+                            self.logger.info(out_dict2str(self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)))
+                    else:  # Need to look for the accuracy calculated for the training batch
+                        acc, loss = logs.get('acc', None), logs.get('loss', None)
+                        assert acc is not None and loss is not None
+                        if self.out_dict is None:  # Heuristic: 1st call to `compute_loss` corresponds to training
+                            # Now is the 1st call, after logging for last batch completes
+                            self.out_dict = dict(step=step, train_acc=acc, train_loss=loss)
+                elif 'loss' in logs:  # Internal training log
+                    # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
+                    # But log anyway, for after gradient update, evaluation loss changes
+                    tr_loss, lr, n_ep = (logs.get(k, None) for k in ('loss', 'learning_rate', 'epoch'))
+                    assert all(elm is not None for elm in (tr_loss, lr, n_ep))
+                    tr_loss_compute = self.out_dict.get('train_loss', None)
+                    # Without overriding `_maybe_log_save_evaluate`, can only get the training loss with 4 decimal place
+                    assert round(tr_loss_compute, 4) == tr_loss
+                    # See Trainer.train(); compute_loss executes before step increments
+                    assert self.out_dict['step'] == step-1  # Override step & loss
+                    self.out_dict.update(dict(step=step, train_loss=tr_loss, lr=lr, epoch=n_ep))
+                elif 'eval_loss' in logs:
+                    if step != 0:
+                        vl_loss, vl_acc, n_ep_ = (logs.get(k, None) for k in ('eval_loss', 'eval_accuracy', 'epoch'))
+                        assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
+                        assert step == self.out_dict['step']
                         assert n_ep_ == self.out_dict['epoch']
-                    out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
-                    self.logger.info(out_dict2str(out))
-                    self.log_hist.append(out)
-                    self.out_dict = None
+                        out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
+                        self.logger.info(out_dict2str(out))
+                        self.log_hist.append(out)
+                        self.out_dict = None
+                elif any('runtime' in k for k in logs.keys()):
+                    self.logger.info(logs)
+                else:
+                    print('unhandled case')
+                    exit(1)
             else:
-                self.logger.info('Not expected logging: ', logs)
+                if 'src' not in logs:  # Skip custom compute_loss logging
+                    self.logger.info(logs)
 
 
 class CustomTrainer(Trainer):
@@ -226,7 +219,6 @@ class CustomTrainer(Trainer):
         self.callback_handler.callbacks = [
             c for c in callbacks if str(c.__class__) != "<class 'transformers.trainer_callback.PrinterCallback'>"
         ]
-        ic(self.callback_handler.callbacks)
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -311,4 +303,5 @@ if __name__ == '__main__':
     trainer.add_callback(cb)
     trainer.train()
     cb.set_mode('eval')
+    ic('evaluating')
     ic(trainer.evaluate())
