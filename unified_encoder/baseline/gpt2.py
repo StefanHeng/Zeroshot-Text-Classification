@@ -105,6 +105,7 @@ def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLang
         num_train_epochs=n_ep,
         lr_scheduler_type=sch,
         warmup_ratio=1e-2,
+        log_level='warning',
         logging_strategy='steps',
         logging_steps=1,
         fp16=torch.cuda.is_available(),  # TODO: dynamic loss scaling??
@@ -120,7 +121,7 @@ class MyLoggingCallback(TrainerCallback):
             - Intended for coupled training and evaluation
         - Accuracy as a metric is passed to `Trainer` and training metric computed in `compute_loss` and logged
     """
-    def __init__(self, trainer: Trainer, name='HfLogging'):
+    def __init__(self, trainer: Trainer, name='HfLogging', mode='train'):
         """
         :param trainer: The parent Trainer
         :param name: Logger name
@@ -132,40 +133,47 @@ class MyLoggingCallback(TrainerCallback):
         handler.setFormatter(MyFormatter())
         self.logger.addHandler(handler)
 
-        # Heuristics: Expect
         self.log_count = 0
-        # self.prev_log = None
         self.out_dict: Dict = None
         self.parent_trainer = trainer
         self.called_val_init = False
+        self.log_hist: List[Dict] = []
+
+        self.mode = mode
+
+    def set_mode(self, mode: str):
+        """
+        :param mode: One of ['train', 'eval']
+        """
+        self.mode = mode
 
     def on_log(self, args, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
-            # step_, n_ep__, tr_loss_, vl_loss_, tr_acc_, vl_acc_ = (
-            #     d.get(k, None) for k in ('step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
-            # )
-            # assert all(elm is not None for elm in (step_, tr_loss_, vl_loss_, tr_acc_, vl_acc_))
-            if 'epoch' in d:
-                keys_ = ('step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
-            else:
-                keys_ = ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
-            ic(d)
-            assert all(k in d for k in ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc'))
+            # if 'epoch' in d:
+            #     keys_ = ('step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
+            # else:
+            #     keys_ = ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc')
+            # assert all(k in d for k in ('step', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc'))
+            keys_ = ['step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc']
+            fmt = [':>6', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
 
             d = {k: (('loss' in k and round(v, 4)) or ('acc' in k and round(v*100, 4)) or v) for k, v in d.items()}
-            s_fmt = ', '.join(f'{k}={{{k}}}' for k in keys_)
-            d = {k: logi(v) for k, v in d.items()}
-            return s_fmt.format(**d)
+            # s_fmt = ', '.join(f'{k}={{{k}}}' for k in keys_ if k in d)  # Enforce ordering
+            s_fmts = [f'{{{k}{fmt_}}}' for k, fmt_ in zip(keys_, fmt) if k in d]
+            s_outs = [(k, fmt_.format(**{k: d[k]})) for fmt_, k in zip(s_fmts, keys_) if k in d]
+            # ic(s_outs)
+            # d = {k: logi(v) for k, v in d.items()}
+            # return s_fmt.format(**d)
+            return ', '.join(f'{k}={logi(s)}' for (k, s) in s_outs)
 
         if state.is_local_process_zero:
             self.log_count += 1
-            ic(logs, state.global_step, state.epoch)
+            # ic(logs, state.global_step, state.epoch)
             step = state.global_step
             if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
                 if step == 0:  # Before model runs, initial call
                     if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
                         self.called_val_init = True
-                        # ic('should come here once only')
                         tr_acc, tr_loss, n_ep = (logs.get(k, None) for k in ('acc', 'loss', 'epoch'))
 
                         # Other `on_log` calls invoked inside `evaluate` ignored
@@ -175,18 +183,13 @@ class MyLoggingCallback(TrainerCallback):
                         assert n_ep == n_ep_
                         # Training step in range (1, total steps); Epoch troublesome to calculate TODO
                         # Prep for Trainer internal evaluation call
-                        self.out_dict = dict(step=step, train_acc=tr_acc, train_loss=tr_loss)
+                        self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
                         self.logger.info(out_dict2str(self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)))
                 else:  # Need to look for the accuracy calculated for the training batch
                     acc, loss = logs.get('acc', None), logs.get('loss', None)
                     assert acc is not None and loss is not None
-                    # assert all(k in logs for k in ('acc', 'loss'))
-                    # d_cand = logs | dict(step=step)
-                    # ic('in non-edge compute_loss', self.out_dict, d_cand)
                     if self.out_dict is None:  # Heuristic: 1st call to `compute_loss` corresponds to training
-                        # Now is the 1st call, after logging last batch
-                        # self.out_dict = dict(step=state.global_step, train_acc_cands=[acc], train_loss_cands=[loss])
-                        # ic('in starting new compute_loss cand', d_cand)
+                        # Now is the 1st call, after logging for last batch completes
                         self.out_dict = dict(step=step, train_acc=acc, train_loss=loss)
             elif 'loss' in logs:  # Internal training log
                 # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
@@ -196,37 +199,22 @@ class MyLoggingCallback(TrainerCallback):
                 tr_loss_compute = self.out_dict.get('train_loss', None)
                 # Without overriding `_maybe_log_save_evaluate`, can only get the training loss with 4 decimal place
                 assert round(tr_loss_compute, 4) == tr_loss
-                # hopefully eval loss candidates are not too close
-                # if step == 1:
                 # See Trainer.train(); compute_loss executes before step increments
                 assert self.out_dict['step'] == step-1  # Override step & loss
                 self.out_dict.update(dict(step=step, train_loss=tr_loss, lr=lr, epoch=n_ep))
-                # ic('in train logging edge case', self.out_dict)
-                # else:
-                #     cands = self.out_dict['candidates']
-                #     idx_train = min(range(len(cands)), key=lambda idx: abs(cands[idx]['loss']-tr_loss))
-                #     d_tr = cands[idx_train]
-                #     assert d_tr['step'] == step-1
-                #     # Heuristics, the compute_loss for train seems to be at the end
-                #     assert idx_train == len(cands)-1
-                #     self.out_dict.update(dict(step=step, train_acc=d_tr['acc'], train_loss=tr_loss, lr=lr, epoch=n_ep))
-                #     ic('in training log', self.out_dict)
-                #     # assert 'train_acc_cands' in self.out_dict
-            else:
-                pass
-                # if step not in [0, 1]:  # Similarly, step is before training step increment
-                ic('in eval logging', step, self.out_dict)
+            elif 'eval_loss' in logs:
                 if step != 0:
-                    assert 'eval_loss' in logs
                     vl_loss, vl_acc, n_ep_ = (logs.get(k, None) for k in ('eval_loss', 'eval_accuracy', 'epoch'))
                     assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
                     assert step == self.out_dict['step']
-                    # if step != 1:  # See `compute_loss` logging edge case above
-                    assert n_ep_ == self.out_dict['epoch']
-                    self.logger.info(out_dict2str(self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)))
+                    if self.mode == 'train':
+                        assert n_ep_ == self.out_dict['epoch']
+                    out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
+                    self.logger.info(out_dict2str(out))
+                    self.log_hist.append(out)
                     self.out_dict = None
-                # else:  # Skip printing
-                #     self.out_dict = None
+            else:
+                self.logger.info('Not expected logging: ', logs)
 
 
 class CustomTrainer(Trainer):
@@ -322,4 +310,5 @@ if __name__ == '__main__':
     cb = MyLoggingCallback(trainer)
     trainer.add_callback(cb)
     trainer.train()
+    cb.set_mode('eval')
     ic(trainer.evaluate())
