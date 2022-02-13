@@ -1,13 +1,13 @@
 from typing import List, Dict, Callable
 
-import numpy as np
+import pandas as pd
 import transformers
 # LMHead for training
 from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig, GPT2LMHeadModel, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
 from transformers.training_args import OptimizerNames
 
-from transformers import DataCollatorForLanguageModeling, default_data_collator
+from transformers import DataCollatorForLanguageModeling
 from datasets import load_dataset, Dataset
 from datasets import load_metric
 
@@ -33,7 +33,7 @@ def get_dset(
     return tr, vl
 
 
-def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFast]:
+def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling]:
     """
     :param name: Model name, one of [`debug`, `gpt2`, `gpt2-medium`]
     """
@@ -41,31 +41,31 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
 
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
-        n_token = 8
-        conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=24, n_embd=12*8, n_head=12))
-        ic(conf)
+        n_token = 2
+        # conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=24, n_embd=12*8, n_head=12))
+        conf.update(dict(n_ctx=n_token, n_positions=n_token))
+        # ic(conf)
         model_ = GPT2LMHeadModel(config=conf)
-        # ic(model_)
     else:
         model_nm = MODEL_NMS['small']  # TODO: reduce max seq len to 512 as in paper
         model_ = AutoModelWithLMHead.from_pretrained(model_nm)
         n_token = conf.n_positions
-        # ic(model_)
 
     tokenizer_ = AutoTokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
     SPEC_TOKS = ['<|question|>', '<|text|>', '<|answer|>']
     tokenizer_.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=SPEC_TOKS))
     model_.resize_token_embeddings(len(tokenizer_))
-    return model_, tokenizer_
+
+    return model_, tokenizer_, DataCollatorForLanguageModeling(tokenizer=tokenizer_, mlm=False)
 
 
-def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLanguageModeling]:
+def get_train_setup(name='gpt2') -> TrainingArguments:
     D_TRAIN_ARGS = {
         'debug': dict(
-            learning_rate=1e-1,
+            learning_rate=1e-4,
             batch_size=4,
             weight_decay=1e-2,
-            num_train_epochs=8,
+            num_train_epochs=128,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -86,7 +86,6 @@ def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLang
     lr, bsz, decay, n_ep, sch = (D_TRAIN_ARGS[name][k] for k in [
         'learning_rate', 'batch_size', 'weight_decay', 'num_train_epochs', 'lr_scheduler_type'
     ])
-    # ic(n_ep)
 
     return TrainingArguments(
         output_dir=os.path.join(PATH_BASE, DIR_PROJ, DIR_MDL, 'gpt2'),
@@ -110,7 +109,60 @@ def get_train_setup(name='gpt2') -> tuple[TrainingArguments, DataCollatorForLang
         fp16=torch.cuda.is_available(),  # TODO: dynamic loss scaling??
         optim=OptimizerNames.ADAMW_TORCH,
         disable_tqdm=True
-    ), DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    )
+
+
+def compute_metrics(eval_pred):
+    if not hasattr(compute_metrics, 'metric'):
+        compute_metrics.metric = load_metric('accuracy')
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    labels, predictions = labels.flatten(), predictions.flatten()  # Original 2D tensor gives error
+    return compute_metrics.metric.compute(predictions=predictions, references=labels)
+
+
+class TrainPlot:
+    """
+    An interactive matplotlib graph to log metrics during training
+    """
+    def __init__(self, title='Transformer Training'):
+        fig, self.axes = plt.subplots(2, 1, figsize=(16, 9))
+        plt.suptitle(title)
+        self.axes[0].set_xlabel('Step')
+        self.axes[0].set_ylabel('Loss')
+        self.axes[1].set_xlabel('Step')
+        self.axes[1].set_ylabel('Accuracy (%)')
+        # ic(type(self.axes))
+        # self.is_1st_call = False
+        plt.ion()
+        plt.show()
+
+    def update(self, stats: List[Dict]):
+        """
+        Updates the plot with a new data point
+
+        :param stats: List of training step stats
+        """
+        df = pd.DataFrame(stats)
+        # ic(df)
+        step, tr_acc, tr_loss, vl_acc, vl_loss = (
+            df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss')
+        )
+        # ic(step, tr_acc, tr_loss, vl_acc, vl_loss)
+        ax1, ax2 = self.axes
+        ax1.clear()
+        ax2.clear()
+        ax1.plot(step, tr_loss, label='Training Loss', **LN_KWARGS)
+        ax1.plot(step, vl_loss, label='Validation Loss', **LN_KWARGS)
+        ax2.plot(step, tr_acc, label='Training Accuracy', **LN_KWARGS)
+        ax2.plot(step, vl_acc, label='Validation Accuracy', **LN_KWARGS)
+        # ic('in update')
+        # if not self.is_1st_call:
+        #     self.is_1st_call = True
+        ax1.legend()
+        ax2.legend()
+        plt.pause(1e-5)  # Needed for `ion`
+        # exit(1)
 
 
 class MyLoggingCallback(TrainerCallback):
@@ -120,7 +172,7 @@ class MyLoggingCallback(TrainerCallback):
             - Intended for coupled training and evaluation
         - Accuracy as a metric is passed to `Trainer` and training metric computed in `compute_loss` and logged
     """
-    def __init__(self, trainer: Trainer, name='HfLogging', mode='train'):
+    def __init__(self, trainer: Trainer, name='HfLogging', mode='train', interactive=True):
         """
         :param trainer: The parent Trainer
         :param name: Logger name
@@ -138,6 +190,13 @@ class MyLoggingCallback(TrainerCallback):
         self.log_hist: List[Dict] = []
 
         self.mode = mode
+        self.interactive = interactive
+        if interactive:
+            # plt.plot([1, 2], [3, 5])
+            # plt.show()
+
+            self.plot = TrainPlot(title='GPT-2 training')
+            ic('interactive plot')
 
     def set_mode(self, mode: str):
         """
@@ -154,6 +213,12 @@ class MyLoggingCallback(TrainerCallback):
             d = {k: (('loss' in k and round(v, 4)) or ('acc' in k and round(v*100, 4)) or v) for k, v in d.items()}
             s_outs = [(k, fmt_.format(**{k: d[k]})) for fmt_, k in zip(s_fmts, keys_) if k in d]
             return ', '.join(f'{k}={logi(s)}' for (k, s) in s_outs)
+
+        def log_update(d_out):
+            self.logger.info(out_dict2str(d_out))
+            self.log_hist.append(d_out)
+            if self.interactive:
+                self.plot.update(self.log_hist)
 
         if state.is_local_process_zero:
             if self.mode == 'train':
@@ -172,7 +237,8 @@ class MyLoggingCallback(TrainerCallback):
                             # Training step in range (1, total steps); Epoch troublesome to calculate TODO
                             # Prep for Trainer internal evaluation call
                             self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
-                            self.logger.info(out_dict2str(self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)))
+                            out = self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)
+                            log_update(out)
                     else:  # Need to look for the accuracy calculated for the training batch
                         acc, loss = logs.get('acc', None), logs.get('loss', None)
                         assert acc is not None and loss is not None
@@ -197,8 +263,10 @@ class MyLoggingCallback(TrainerCallback):
                         assert step == self.out_dict['step']
                         assert n_ep_ == self.out_dict['epoch']
                         out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
-                        self.logger.info(out_dict2str(out))
-                        self.log_hist.append(out)
+                        log_update(out)
+                        # self.logger.info(out_dict2str(out))
+                        # self.log_hist.append(out)
+                        # self.plot.update(self.log_hist)
                         self.out_dict = None
                 elif any('runtime' in k for k in logs.keys()):
                     self.logger.info(logs)
@@ -255,7 +323,7 @@ class CustomTrainer(Trainer):
 
         # ========================== Begin of added ==========================
         if 'labels' in inputs:
-            log_dict['loss'] = loss.detach().item()  # For determining which dataset
+            log_dict['loss'] = loss.detach().item()
             self.log(log_dict)
         # ========================== End of added ==========================
 
@@ -271,30 +339,17 @@ if __name__ == '__main__':
     transformers.set_seed(seed)
 
     nm = 'debug'
-    model, tokenizer = get_model_n_tokenizer(nm)
-    train_args, data_collator = get_train_setup(nm)
-    # ic(train_args)
+    model, tokenizer, data_collator = get_model_n_tokenizer(nm)
+    train_args = get_train_setup(nm)
 
     def tokenize_func(sample):
-        ret = tokenizer(sample['text'], padding='max_length', truncation=True)
-        # ret['labels'] = ret['input_ids'].copy()
-        return ret
+        return tokenizer(sample['text'], padding='max_length', truncation=True)
     dset_tr, dset_vl = get_dset(map_func=tokenize_func, remove_columns=['label', 'text'], n_sample=8, random_seed=seed)
 
-    metric = load_metric('accuracy')
-
-    def compute_metrics(eval_pred):
-        logits, labels = eval_pred
-        predictions = np.argmax(logits, axis=-1)
-        labels, predictions = labels.flatten(), predictions.flatten()  # Original 2D tensor gives error
-        return metric.compute(predictions=predictions, references=labels)
-
-    # trainer = Trainer(
     trainer = CustomTrainer(
         model=model,
         args=train_args,
         data_collator=data_collator,
-        # data_collator=default_data_collator,
         train_dataset=dset_tr,
         eval_dataset=dset_vl,
         compute_metrics=compute_metrics
@@ -303,5 +358,4 @@ if __name__ == '__main__':
     trainer.add_callback(cb)
     trainer.train()
     cb.set_mode('eval')
-    ic('evaluating')
     ic(trainer.evaluate())

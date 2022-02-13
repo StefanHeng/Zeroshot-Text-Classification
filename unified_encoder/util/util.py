@@ -21,6 +21,7 @@ from .data_path import *
 
 rcParams['figure.constrained_layout.use'] = True
 sns.set_style('darkgrid')
+LN_KWARGS = dict(marker='o', ms=0.3, lw=0.25)  # matplotlib line plot default args
 
 
 def get_python_version():
