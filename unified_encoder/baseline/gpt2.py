@@ -41,7 +41,7 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
 
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
-        n_token = 2
+        n_token = 4
         # conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=24, n_embd=12*8, n_head=12))
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
@@ -65,7 +65,8 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
             learning_rate=1e-4,
             batch_size=4,
             weight_decay=1e-2,
-            num_train_epochs=128,
+            # num_train_epochs=128,
+            num_train_epochs=4,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -125,17 +126,22 @@ class TrainPlot:
     """
     An interactive matplotlib graph to log metrics during training
     """
-    def __init__(self, title='Transformer Training'):
+    def __init__(self, title='Transformer Training', interactive=True):
+        self.title = title
+        self.axes = None
+        self.interactive = interactive
+
+    def make_plot(self):
         fig, self.axes = plt.subplots(2, 1, figsize=(16, 9))
-        plt.suptitle(title)
+        # ic(self.title)
+        fig.suptitle(self.title)
         self.axes[0].set_xlabel('Step')
         self.axes[0].set_ylabel('Loss')
         self.axes[1].set_xlabel('Step')
         self.axes[1].set_ylabel('Accuracy (%)')
-        # ic(type(self.axes))
-        # self.is_1st_call = False
-        plt.ion()
-        plt.show()
+        if self.interactive:
+            plt.ion()
+        # plt.show()
 
     def update(self, stats: List[Dict]):
         """
@@ -144,11 +150,9 @@ class TrainPlot:
         :param stats: List of training step stats
         """
         df = pd.DataFrame(stats)
-        # ic(df)
         step, tr_acc, tr_loss, vl_acc, vl_loss = (
             df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss')
         )
-        # ic(step, tr_acc, tr_loss, vl_acc, vl_loss)
         ax1, ax2 = self.axes
         ax1.clear()
         ax2.clear()
@@ -156,13 +160,18 @@ class TrainPlot:
         ax1.plot(step, vl_loss, label='Validation Loss', **LN_KWARGS)
         ax2.plot(step, tr_acc, label='Training Accuracy', **LN_KWARGS)
         ax2.plot(step, vl_acc, label='Validation Accuracy', **LN_KWARGS)
-        # ic('in update')
-        # if not self.is_1st_call:
-        #     self.is_1st_call = True
         ax1.legend()
         ax2.legend()
         plt.pause(1e-5)  # Needed for `ion`
-        # exit(1)
+
+    def plot_single(self, stats):
+        """
+        Make single static plot
+        """
+        self.make_plot()
+        self.update(stats)
+        plt.ioff()
+        plt.show()
 
 
 class MyLoggingCallback(TrainerCallback):
@@ -190,13 +199,10 @@ class MyLoggingCallback(TrainerCallback):
         self.log_hist: List[Dict] = []
 
         self.mode = mode
-        self.interactive = interactive
-        if interactive:
-            # plt.plot([1, 2], [3, 5])
-            # plt.show()
+        self.train_begin, self.train_end = None, None
 
-            self.plot = TrainPlot(title='GPT-2 training')
-            ic('interactive plot')
+        self.interactive = interactive
+        self.plot = TrainPlot(title='GPT-2 training')
 
     def set_mode(self, mode: str):
         """
@@ -204,7 +210,25 @@ class MyLoggingCallback(TrainerCallback):
         """
         self.mode = mode
 
-    def on_log(self, args, state, control, logs: Dict = None, **kwargs):
+    def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
+        self.train_begin = True
+        if self.interactive:
+            self.plot.make_plot()
+
+    def on_train_end(self, args: TrainingArguments, state, control, **kwargs):
+        if self.train_begin:
+            self.train_begin = False
+            self.train_end = True
+            if self.interactive:  # If didn't show plot before
+                plt.ioff()
+                plt.show()
+            else:
+                self.plot.plot_single(self.log_hist)
+                # self.plot.make_plot()
+                # self.plot.update(self.log_hist)
+            # plt.show()
+
+    def on_log(self, args: TrainingArguments, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
             keys_ = ['step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc']
             fmt = [':>4', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
@@ -264,9 +288,6 @@ class MyLoggingCallback(TrainerCallback):
                         assert n_ep_ == self.out_dict['epoch']
                         out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
                         log_update(out)
-                        # self.logger.info(out_dict2str(out))
-                        # self.log_hist.append(out)
-                        # self.plot.update(self.log_hist)
                         self.out_dict = None
                 elif any('runtime' in k for k in logs.keys()):
                     self.logger.info(logs)
@@ -354,7 +375,7 @@ if __name__ == '__main__':
         eval_dataset=dset_vl,
         compute_metrics=compute_metrics
     )
-    cb = MyLoggingCallback(trainer)
+    cb = MyLoggingCallback(trainer, interactive=False)
     trainer.add_callback(cb)
     trainer.train()
     cb.set_mode('eval')
