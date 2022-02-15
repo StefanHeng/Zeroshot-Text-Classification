@@ -73,9 +73,9 @@ def config(attr):
     return get(config.config, attr)
 
 
-def now(as_str=True):
+def now(as_str=True, sep=':'):
     d = datetime.now()
-    return d.strftime('%Y-%m-%d %H:%M:%S') if as_str else d
+    return d.strftime(f'%Y-%m-%d %H{sep}%M{sep}%S') if as_str else d  # Considering file output path
 
 
 def log(s, c: str = 'log', c_time='green', as_str=False):

@@ -1,16 +1,13 @@
 from typing import List, Dict, Callable
-# from collections import OrderedDict
 
 import pandas as pd
-import torch
 import transformers
 # LMHead for training
+from transformers import BatchEncoding
 from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig, GPT2LMHeadModel, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
-from transformers.training_args import OptimizerNames
-from transformers import BatchEncoding
-
 from transformers import DataCollatorForLanguageModeling
+from transformers.training_args import OptimizerNames
 from datasets import load_dataset, Dataset
 from datasets import load_metric
 
@@ -41,15 +38,13 @@ def get_dset(
     return tr, vl
 
 
-def tokenize_func(tokenizer_, dnm='ag_news', max_length=None, return_tensors='pt'):
+def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
     if max_length is None:
         max_length = tokenizer_.model_max_length
         ic(tokenizer_.model_max_length)
     templates = config('baselines.gpt2-0shot.templates')
-    # ic(templates, len(templates))
     assert dnm == 'ag_news'  # TODO: support other datasets?
     feats = load_dataset(dnm, split='train').features['label']
-    # ic(feats, feats.names)
     feat2feat_full = {
         'World': 'World News',
         'Sports': 'Sports',
@@ -57,7 +52,6 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None, return_tensors='pt
         'Sci/Tech': 'Science & Technology'
     }
     lb2feat_full = [feat2feat_full[feats.names[i]] for i in range(feats.num_classes)]  # Labels = range
-    # ic(lb2feat_full)
 
     # TODO: support pre-training task, variable option sizes?
     # TODO: are the labels in fine-tuned downstream task shuffled also?
@@ -70,95 +64,33 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None, return_tensors='pt
         :param sample: A batch of data samples
         """
         idxs_tpl = np.random.randint(len(templates), size=len(sample['label']))
-        ic(idxs_tpl, sample)
-        # args = dict(max_length=max_length, padding='max_length', truncation=True, return_tensors=return_tensors)
-        args = dict(max_length=max_length, padding='max_length', return_tensors=return_tensors)
 
         def join_parts(parts: List[Dict[str, List]]):
-            gen = (tokenizer_(elm) for elm in parts)  # Get lists for now, for each part
+            # Calling tokenizer with `is_split_into_words` doesn't produce same result
+            # No special token is added by tokenizer
+            gen = (tokenizer_(elm) for elm in parts)  # Get lists for now
             ids_, msks_ = zip(*((d['input_ids'], d['attention_mask']) for d in gen))
-            # out = tokenizer_(parts[0])
-            # ic(type(out), out)
             return sum(ids_, start=[]), sum(msks_, start=[])
-            # return dict(
-            #     input_ids=sum(ids_, start=[]),
-            #     attention_mask=sum(msks_, start=[])
-            # )
-            # ic(ids, msks)
-            # ids, msk = list(*zip(d['input_ids'], d['attention_mask']))
 
-        def single_sample2str(
-                i, cont: str, lb: int
-        ):
-        # ) -> tuple[List[int], List[int]]:
-            # ic(i, type(i))
-            # ic(i)
-            # ic(idxs_tpl[i])
-            # ic(templates[idxs_tpl[i]])
+        def single_sample2str(i, cont: str, lb: int):
             question = templates[idxs_tpl[i]].format(strs_lb)
-            # s_out = f'{q} {question} {eos} {t} {cont} {eos} {a} {lb2feat_full[lb]} {eos}'
-            # Ensures no space around special tokens
-
-            # toks = [
-            #     q, *tokenizer_.tokenize(question), eos,
-            #     t, *tokenizer_.tokenize(cont), eos,
-            #     a, *tokenizer_.tokenize(lb2feat_full[lb]), eos
-            # ]
-            # This approach gives an error
-            # AssertionError: You need to instantiate GPT2TokenizerFast
-            # with add_prefix_space=True to use it with pretokenized inputs.
-            # ic(toks)
-            # ic(toks, tokenizer_.encode(toks, is_split_into_words=True))
-            # ic(s_out, tokenizer_.tokenize(s_out))
-            return join_parts([  # No special token is added by tokenizer
+            return join_parts([  # Ensures no space around special tokens
                 q, question, eos,
                 t, cont, eos,
                 a, lb2feat_full[lb], eos
             ])
-            # ic(join_parts(parts))
-            # ic(q, tokenizer_(q), tokenizer_(q, add_special_tokens=False))
-            # exit(1)
-
-        # ic(sample)
         ids_n_msks = [
             single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
         ]
         ids, msks = zip(*((i, m) for i, m in ids_n_msks))
-        # ic(ids_n_msks)
-        # Pad to max_length, truncate if necessary
 
         def pad(ints: List[List[int]], int_pad):
-                # ) -> Union[torch.Tensor, List[List[int]]]:
+            # Pad to max_length, truncate if necessary
             lst = [l[:max_length] if len(l) > max_length else (l + [int_pad] * max_length-len(l)) for l in ints]
-            # ic(lst)
-            # return torch.Tensor(lst) if return_tensors == 'pt' else lst
             return lst
-        # -100 for ignoring the label; 0 for masked positions in attention
-        # ic(pad(ids, int_pad=-100), pad(msks, int_pad=0))
-        # encods = [
-        #     single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
-        # ]
-        # out = tokenizer_.pad(encods, padding='max_length', max_length=20, return_tensors='pt')
-        # out = tokenizer_.pad(encods, padding=True, max_length=20, return_tensors='pt')
-        # for row in out['input_ids']:
-        #     ic(len(row))
-        # ic(out)
-        # ic(out['input_ids'].shape)
-        # ic(out['attention_mask'].shape)
-        # ic(ids, msks)
-        # TODO
-        # context = tokenizer_(txts, **args)
-        # context = tokenizer_(sample['text'], **args)
-        # ic(type(sample['label']), sample['label'])
-        # label = tokenizer_([lb2feat_full[lb] for lb in sample['label']], **args)
-        # ic(sample, type(sample['input_ids']))
-        # ic(context, label)
-        out = BatchEncoding(
-            dict(input_ids=pad(ids, int_pad=-100), attention_mask=pad(msks, int_pad=0)), tensor_type=return_tensors
+        return BatchEncoding(  # -100 for ignoring the label; 0 for masked positions in attention
+            dict(input_ids=pad(ids, int_pad=-100), attention_mask=pad(msks, int_pad=0))
         )
-        ic(out)
-        exit(1)
-        return sample
     return _tokenize_func
 
 
@@ -171,7 +103,6 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
         n_token = 4
-        # conf.update(dict(n_ctx=n_token, n_positions=n_token, n_layer=24, n_embd=12*8, n_head=12))
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
         model_ = GPT2LMHeadModel(config=conf)
@@ -255,20 +186,36 @@ class TrainPlot:
     """
     An interactive matplotlib graph to log metrics during training
     """
-    def __init__(self, title='Transformer Training', interactive=True):
+    def __init__(
+            self,
+            title='Transformer Training', train_args: TrainingArguments = None,
+            interactive=True, save_plot=True
+    ):
         self.title = title
         self.axes = None
+        self.lines = []
+        self.first = True
+
         self.interactive = interactive
+        self.save_plot = save_plot
+        self.colors = sns.color_palette(palette='husl', n_colors=7)
+        self.c_tr, self.c_vl = self.colors[0], self.colors[3]
+
+        self.train_args = train_args
+        lr, bsz, n_ep = train_args.learning_rate, train_args.per_device_train_batch_size, train_args.num_train_epochs
+        self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, epochs=${n_ep}$'
+        self.title_save = f'{title}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
     def make_plot(self):
         fig, self.axes = plt.subplots(2, 1, figsize=(16, 9))
-        fig.suptitle(self.title)
+        fig.suptitle(self.title_plot)
         self.axes[0].set_xlabel('Step')
         self.axes[0].set_ylabel('Loss')
         self.axes[1].set_xlabel('Step')
         self.axes[1].set_ylabel('Accuracy (%)')
         if self.interactive:
             plt.ion()
+            # plt.show()
 
     def update(self, stats: List[Dict]):
         """
@@ -281,12 +228,35 @@ class TrainPlot:
             df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss')
         )
         ax1, ax2 = self.axes
-        ax1.clear()
-        ax2.clear()
-        ax1.plot(step, tr_loss, label='Training Loss', **LN_KWARGS)
-        ax1.plot(step, vl_loss, label='Validation Loss', **LN_KWARGS)
-        ax2.plot(step, tr_acc, label='Training Accuracy', **LN_KWARGS)
-        ax2.plot(step, vl_acc, label='Validation Accuracy', **LN_KWARGS)
+        # ax1.cla()
+        # ax2.cla()
+        # if self.lines:
+        #     for l in self.lines:
+        #         # ic(l)
+        #         l[0].remove()  # As plot returns length-1 list
+        # if self.first:
+        #     self.lines = [
+        # Re-plot for the range
+        while ax1.lines:
+            ax1.lines[-1].remove()
+        while ax2.lines:
+            ax2.lines[-1].remove()
+        ax1.plot(step, tr_loss, label='Training Loss', c=self.c_tr, **LN_KWARGS)
+        ax1.plot(step, vl_loss, label='Validation Loss', c=self.c_vl, **LN_KWARGS)
+        ax2.plot(step, tr_acc, label='Training Accuracy', c=self.c_tr, **LN_KWARGS)
+        ax2.plot(step, vl_acc, label='Validation Accuracy', c=self.c_vl, **LN_KWARGS)
+            # ]
+            # self.first = False
+        # else:
+        #     # for l, data in zip(self.lines, (tr_loss, vl_loss, tr_acc, vl_acc)):
+        #     #     l.set_data(step, data)
+        #     ic(ax1.lines)
+        #     ax1.lines[0].set_data(step, tr_loss)
+        # ic(self.lines)
+        # self.axes[0].set_xlabel('Step')
+        # self.axes[0].set_ylabel('Loss')
+        # self.axes[1].set_xlabel('Step')
+        # self.axes[1].set_ylabel('Accuracy (%)')
         ax1.legend()
         ax2.legend()
         plt.pause(1e-5)  # Needed for `ion`
@@ -297,8 +267,16 @@ class TrainPlot:
         """
         self.make_plot()
         self.update(stats)
-        plt.ioff()
+        self.finish()
+
+    def finish(self):
+        plt.ioff()  # Keep the plot window
+        if self.save_plot:
+            self.save()
         plt.show()
+
+    def save(self):
+        plt.savefig(os.path.join(self.train_args.output_dir, f'{self.title_save}.png'), dpi=300)
 
 
 class MyLoggingCallback(TrainerCallback):
@@ -308,7 +286,7 @@ class MyLoggingCallback(TrainerCallback):
             - Intended for coupled training and evaluation
         - Accuracy as a metric is passed to `Trainer` and training metric computed in `compute_loss` and logged
     """
-    def __init__(self, trainer: Trainer, name='HfLogging', mode='train', interactive=True):
+    def __init__(self, trainer: Trainer, name='GPT-2 Training', mode='train', interactive=True, save_plot=True):
         """
         :param trainer: The parent Trainer
         :param name: Logger name
@@ -329,7 +307,8 @@ class MyLoggingCallback(TrainerCallback):
         self.train_begin, self.train_end = None, None
 
         self.interactive = interactive
-        self.plot = TrainPlot(title='GPT-2 training')
+        # ic()  # TODO get descriptive title
+        self.plot = TrainPlot(title=name, train_args=trainer.args, save_plot=save_plot)
 
     def set_mode(self, mode: str):
         """
@@ -348,8 +327,7 @@ class MyLoggingCallback(TrainerCallback):
             self.train_begin = False
             self.train_end = True
             if self.interactive:
-                plt.ioff()  # Keep the plot window
-                plt.show()
+                self.plot.finish()
             else:  # If didn't show plot before
                 self.plot.plot_single(self.log_hist)
         self.mode = 'eval'
@@ -505,3 +483,4 @@ if __name__ == '__main__':
     trainer.train()
     cb.set_mode('eval')
     ic(trainer.evaluate())
+    trainer.save_model(os.path.join(trainer.args.output_dir, now(sep='-')))
