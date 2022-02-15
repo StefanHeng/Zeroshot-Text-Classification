@@ -1,17 +1,26 @@
 from typing import List, Dict, Callable
+# from collections import OrderedDict
 
 import pandas as pd
+import torch
 import transformers
 # LMHead for training
 from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig, GPT2LMHeadModel, GPT2TokenizerFast
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
 from transformers.training_args import OptimizerNames
+from transformers import BatchEncoding
 
 from transformers import DataCollatorForLanguageModeling
 from datasets import load_dataset, Dataset
 from datasets import load_metric
 
 from unified_encoder.util import *
+
+SPEC_TOKS = OrderedDict([
+    ('pref_ques', '<|question|>'),
+    ('pref_text', '<|text|>'),
+    ('pref_ans', '<|answer|>')
+])
 
 
 def get_dset(
@@ -20,7 +29,6 @@ def get_dset(
         n_sample: int = None, random_seed: int = None
 ) -> tuple[Dataset, ...]:
     dset = load_dataset(dnm)
-    # ic(dset['train'][0])
     tr, vl = dset['train'], dset['test']
     if n_sample is not None:
         tr = tr.select(range(n_sample))
@@ -31,6 +39,127 @@ def get_dset(
     if random_seed:
         tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
     return tr, vl
+
+
+def tokenize_func(tokenizer_, dnm='ag_news', max_length=None, return_tensors='pt'):
+    if max_length is None:
+        max_length = tokenizer_.model_max_length
+        ic(tokenizer_.model_max_length)
+    templates = config('baselines.gpt2-0shot.templates')
+    # ic(templates, len(templates))
+    assert dnm == 'ag_news'  # TODO: support other datasets?
+    feats = load_dataset(dnm, split='train').features['label']
+    # ic(feats, feats.names)
+    feat2feat_full = {
+        'World': 'World News',
+        'Sports': 'Sports',
+        'Business': 'Business',
+        'Sci/Tech': 'Science & Technology'
+    }
+    lb2feat_full = [feat2feat_full[feats.names[i]] for i in range(feats.num_classes)]  # Labels = range
+    # ic(lb2feat_full)
+
+    # TODO: support pre-training task, variable option sizes?
+    # TODO: are the labels in fine-tuned downstream task shuffled also?
+    strs_lb = ' , '.join(f'" {lb} "' for lb in lb2feat_full)
+    q, t, a = (SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_ans'))
+    eos = tokenizer.eos_token
+
+    def _tokenize_func(sample: Dict[str, List]):
+        """
+        :param sample: A batch of data samples
+        """
+        idxs_tpl = np.random.randint(len(templates), size=len(sample['label']))
+        ic(idxs_tpl, sample)
+        # args = dict(max_length=max_length, padding='max_length', truncation=True, return_tensors=return_tensors)
+        args = dict(max_length=max_length, padding='max_length', return_tensors=return_tensors)
+
+        def join_parts(parts: List[Dict[str, List]]):
+            gen = (tokenizer_(elm) for elm in parts)  # Get lists for now, for each part
+            ids_, msks_ = zip(*((d['input_ids'], d['attention_mask']) for d in gen))
+            # out = tokenizer_(parts[0])
+            # ic(type(out), out)
+            return sum(ids_, start=[]), sum(msks_, start=[])
+            # return dict(
+            #     input_ids=sum(ids_, start=[]),
+            #     attention_mask=sum(msks_, start=[])
+            # )
+            # ic(ids, msks)
+            # ids, msk = list(*zip(d['input_ids'], d['attention_mask']))
+
+        def single_sample2str(
+                i, cont: str, lb: int
+        ):
+        # ) -> tuple[List[int], List[int]]:
+            # ic(i, type(i))
+            # ic(i)
+            # ic(idxs_tpl[i])
+            # ic(templates[idxs_tpl[i]])
+            question = templates[idxs_tpl[i]].format(strs_lb)
+            # s_out = f'{q} {question} {eos} {t} {cont} {eos} {a} {lb2feat_full[lb]} {eos}'
+            # Ensures no space around special tokens
+
+            # toks = [
+            #     q, *tokenizer_.tokenize(question), eos,
+            #     t, *tokenizer_.tokenize(cont), eos,
+            #     a, *tokenizer_.tokenize(lb2feat_full[lb]), eos
+            # ]
+            # This approach gives an error
+            # AssertionError: You need to instantiate GPT2TokenizerFast
+            # with add_prefix_space=True to use it with pretokenized inputs.
+            # ic(toks)
+            # ic(toks, tokenizer_.encode(toks, is_split_into_words=True))
+            # ic(s_out, tokenizer_.tokenize(s_out))
+            return join_parts([  # No special token is added by tokenizer
+                q, question, eos,
+                t, cont, eos,
+                a, lb2feat_full[lb], eos
+            ])
+            # ic(join_parts(parts))
+            # ic(q, tokenizer_(q), tokenizer_(q, add_special_tokens=False))
+            # exit(1)
+
+        # ic(sample)
+        ids_n_msks = [
+            single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
+        ]
+        ids, msks = zip(*((i, m) for i, m in ids_n_msks))
+        # ic(ids_n_msks)
+        # Pad to max_length, truncate if necessary
+
+        def pad(ints: List[List[int]], int_pad):
+                # ) -> Union[torch.Tensor, List[List[int]]]:
+            lst = [l[:max_length] if len(l) > max_length else (l + [int_pad] * max_length-len(l)) for l in ints]
+            # ic(lst)
+            # return torch.Tensor(lst) if return_tensors == 'pt' else lst
+            return lst
+        # -100 for ignoring the label; 0 for masked positions in attention
+        # ic(pad(ids, int_pad=-100), pad(msks, int_pad=0))
+        # encods = [
+        #     single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
+        # ]
+        # out = tokenizer_.pad(encods, padding='max_length', max_length=20, return_tensors='pt')
+        # out = tokenizer_.pad(encods, padding=True, max_length=20, return_tensors='pt')
+        # for row in out['input_ids']:
+        #     ic(len(row))
+        # ic(out)
+        # ic(out['input_ids'].shape)
+        # ic(out['attention_mask'].shape)
+        # ic(ids, msks)
+        # TODO
+        # context = tokenizer_(txts, **args)
+        # context = tokenizer_(sample['text'], **args)
+        # ic(type(sample['label']), sample['label'])
+        # label = tokenizer_([lb2feat_full[lb] for lb in sample['label']], **args)
+        # ic(sample, type(sample['input_ids']))
+        # ic(context, label)
+        out = BatchEncoding(
+            dict(input_ids=pad(ids, int_pad=-100), attention_mask=pad(msks, int_pad=0)), tensor_type=return_tensors
+        )
+        ic(out)
+        exit(1)
+        return sample
+    return _tokenize_func
 
 
 def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling]:
@@ -52,8 +181,8 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
         n_token = conf.n_positions
 
     tokenizer_ = AutoTokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
-    SPEC_TOKS = ['<|question|>', '<|text|>', '<|answer|>']
-    tokenizer_.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=SPEC_TOKS))
+    tokenizer_.pad_token = tokenizer_.eos_token
+    tokenizer_.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=list(SPEC_TOKS.values())))
     model_.resize_token_embeddings(len(tokenizer_))
 
     return model_, tokenizer_, DataCollatorForLanguageModeling(tokenizer=tokenizer_, mlm=False)
@@ -133,7 +262,6 @@ class TrainPlot:
 
     def make_plot(self):
         fig, self.axes = plt.subplots(2, 1, figsize=(16, 9))
-        # ic(self.title)
         fig.suptitle(self.title)
         self.axes[0].set_xlabel('Step')
         self.axes[0].set_ylabel('Loss')
@@ -141,7 +269,6 @@ class TrainPlot:
         self.axes[1].set_ylabel('Accuracy (%)')
         if self.interactive:
             plt.ion()
-        # plt.show()
 
     def update(self, stats: List[Dict]):
         """
@@ -211,6 +338,7 @@ class MyLoggingCallback(TrainerCallback):
         self.mode = mode
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
+        self.mode = 'train'
         self.train_begin = True
         if self.interactive:
             self.plot.make_plot()
@@ -219,14 +347,12 @@ class MyLoggingCallback(TrainerCallback):
         if self.train_begin:
             self.train_begin = False
             self.train_end = True
-            if self.interactive:  # If didn't show plot before
-                plt.ioff()
+            if self.interactive:
+                plt.ioff()  # Keep the plot window
                 plt.show()
-            else:
+            else:  # If didn't show plot before
                 self.plot.plot_single(self.log_hist)
-                # self.plot.make_plot()
-                # self.plot.update(self.log_hist)
-            # plt.show()
+        self.mode = 'eval'
 
     def on_log(self, args: TrainingArguments, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
@@ -362,10 +488,9 @@ if __name__ == '__main__':
     nm = 'debug'
     model, tokenizer, data_collator = get_model_n_tokenizer(nm)
     train_args = get_train_setup(nm)
-
-    def tokenize_func(sample):
-        return tokenizer(sample['text'], padding='max_length', truncation=True)
-    dset_tr, dset_vl = get_dset(map_func=tokenize_func, remove_columns=['label', 'text'], n_sample=8, random_seed=seed)
+    dset_tr, dset_vl = get_dset(
+        map_func=tokenize_func(tokenizer), remove_columns=['label', 'text'], n_sample=8, random_seed=seed
+    )
 
     trainer = CustomTrainer(
         model=model,
@@ -375,7 +500,7 @@ if __name__ == '__main__':
         eval_dataset=dset_vl,
         compute_metrics=compute_metrics
     )
-    cb = MyLoggingCallback(trainer, interactive=False)
+    cb = MyLoggingCallback(trainer, interactive=True)
     trainer.add_callback(cb)
     trainer.train()
     cb.set_mode('eval')
