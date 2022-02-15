@@ -41,7 +41,6 @@ def get_dset(
 def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
     if max_length is None:
         max_length = tokenizer_.model_max_length
-        ic(tokenizer_.model_max_length)
     templates = config('baselines.gpt2-0shot.templates')
     assert dnm == 'ag_news'  # TODO: support other datasets?
     feats = load_dataset(dnm, split='train').features['label']
@@ -51,11 +50,10 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
         'Business': 'Business',
         'Sci/Tech': 'Science & Technology'
     }
-    lb2feat_full = [feat2feat_full[feats.names[i]] for i in range(feats.num_classes)]  # Labels = range
+    n_cls = feats.num_classes
+    lb2feat_full = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
 
     # TODO: support pre-training task, variable option sizes?
-    # TODO: are the labels in fine-tuned downstream task shuffled also?
-    strs_lb = ' , '.join(f'" {lb} "' for lb in lb2feat_full)
     q, t, a = (SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_ans'))
     eos = tokenizer.eos_token
 
@@ -63,7 +61,10 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
         """
         :param sample: A batch of data samples
         """
-        idxs_tpl = np.random.randint(len(templates), size=len(sample['label']))
+        ln = len(sample['label'])
+        idxs_tpl = np.random.randint(len(templates), size=ln)
+        idx_lbs = np.tile(np.arange(n_cls), (ln, 1))  # Shuffle the labels as in 0-shot pre-training
+        [np.random.shuffle(row) for row in idx_lbs]
 
         def join_parts(parts: List[Dict[str, List]]):
             # Calling tokenizer with `is_split_into_words` doesn't produce same result
@@ -73,6 +74,7 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
             return sum(ids_, start=[]), sum(msks_, start=[])
 
         def single_sample2str(i, cont: str, lb: int):
+            strs_lb = ' , '.join(f'" {lb2feat_full[idx]} "' for idx in idx_lbs[i])
             question = templates[idxs_tpl[i]].format(strs_lb)
             return join_parts([  # Ensures no space around special tokens
                 q, question, eos,
@@ -83,6 +85,12 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
             single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
         ]
         ids, msks = zip(*((i, m) for i, m in ids_n_msks))
+        for txt, label, row in zip(sample['text'], sample['label'], ids):
+            print(txt)
+            print(label)
+            print(' '.join(tokenizer_.decode(i) for i in row))
+            print()
+        exit(1)
 
         def pad(ints: List[List[int]], int_pad):
             # Pad to max_length, truncate if necessary
@@ -154,7 +162,7 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
         evaluation_strategy='steps',
         per_device_train_batch_size=bsz,
         per_device_eval_batch_size=bsz,
-        # Adam's beta1, beta2, epsilon taken from
+        # Adam's beta1, beta2, epsilon taken from the GPT2 config in
         # https://github.com/huggingface/transformers/blob/master/examples/pytorch/language-modeling/run_clm.py
         learning_rate=lr,
         adam_beta1=0.9,
@@ -215,7 +223,6 @@ class TrainPlot:
         self.axes[1].set_ylabel('Accuracy (%)')
         if self.interactive:
             plt.ion()
-            # plt.show()
 
     def update(self, stats: List[Dict]):
         """
@@ -228,15 +235,7 @@ class TrainPlot:
             df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss')
         )
         ax1, ax2 = self.axes
-        # ax1.cla()
-        # ax2.cla()
-        # if self.lines:
-        #     for l in self.lines:
-        #         # ic(l)
-        #         l[0].remove()  # As plot returns length-1 list
-        # if self.first:
-        #     self.lines = [
-        # Re-plot for the range
+        # Re-plot, since x and y lim may change
         while ax1.lines:
             ax1.lines[-1].remove()
         while ax2.lines:
@@ -245,21 +244,9 @@ class TrainPlot:
         ax1.plot(step, vl_loss, label='Validation Loss', c=self.c_vl, **LN_KWARGS)
         ax2.plot(step, tr_acc, label='Training Accuracy', c=self.c_tr, **LN_KWARGS)
         ax2.plot(step, vl_acc, label='Validation Accuracy', c=self.c_vl, **LN_KWARGS)
-            # ]
-            # self.first = False
-        # else:
-        #     # for l, data in zip(self.lines, (tr_loss, vl_loss, tr_acc, vl_acc)):
-        #     #     l.set_data(step, data)
-        #     ic(ax1.lines)
-        #     ax1.lines[0].set_data(step, tr_loss)
-        # ic(self.lines)
-        # self.axes[0].set_xlabel('Step')
-        # self.axes[0].set_ylabel('Loss')
-        # self.axes[1].set_xlabel('Step')
-        # self.axes[1].set_ylabel('Accuracy (%)')
         ax1.legend()
         ax2.legend()
-        plt.pause(1e-5)  # Needed for `ion`
+        plt.draw()  # Needed for `ion`
 
     def plot_single(self, stats):
         """
@@ -307,7 +294,6 @@ class MyLoggingCallback(TrainerCallback):
         self.train_begin, self.train_end = None, None
 
         self.interactive = interactive
-        # ic()  # TODO get descriptive title
         self.plot = TrainPlot(title=name, train_args=trainer.args, save_plot=save_plot)
 
     def set_mode(self, mode: str):
@@ -467,7 +453,7 @@ if __name__ == '__main__':
     model, tokenizer, data_collator = get_model_n_tokenizer(nm)
     train_args = get_train_setup(nm)
     dset_tr, dset_vl = get_dset(
-        map_func=tokenize_func(tokenizer), remove_columns=['label', 'text'], n_sample=8, random_seed=seed
+        map_func=tokenize_func(tokenizer, max_length=128), remove_columns=['label', 'text'], n_sample=8, random_seed=seed
     )
 
     trainer = CustomTrainer(
@@ -478,9 +464,8 @@ if __name__ == '__main__':
         eval_dataset=dset_vl,
         compute_metrics=compute_metrics
     )
-    cb = MyLoggingCallback(trainer, interactive=True)
+    cb = MyLoggingCallback(trainer, interactive=False)
     trainer.add_callback(cb)
     trainer.train()
-    cb.set_mode('eval')
     ic(trainer.evaluate())
     trainer.save_model(os.path.join(trainer.args.output_dir, now(sep='-')))
