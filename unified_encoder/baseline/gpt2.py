@@ -111,8 +111,11 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[GPT2LMHeadModel, GPT2TokenizerFa
     MODEL_NMS = dict(small='gpt2', large='gpt2-medium')
 
     conf = AutoConfig.from_pretrained('gpt2')
-    if name == 'debug':  # Try a smaller model for training sanity check
-        n_token = 128
+    if 'debug' in name:  # Try a smaller model for training sanity check
+        if 'large' in name:
+            n_token = 128
+        else:
+            n_token = 4
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
         model_ = GPT2LMHeadModel(config=conf)
@@ -135,8 +138,14 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
             learning_rate=1e-4,
             batch_size=4,
             weight_decay=1e-2,
-            # num_train_epochs=128,
-            num_train_epochs=32,
+            num_train_epochs=4,
+            lr_scheduler_type=SchedulerType.CONSTANT,
+        ),
+        'debug-large': dict(
+            learning_rate=1e-4,
+            batch_size=32,
+            weight_decay=1e-2,
+            num_train_epochs=128,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -193,6 +202,29 @@ def compute_metrics(eval_pred):
     return compute_metrics.metric.compute(predictions=predictions, references=labels)
 
 
+def get_all_setup(
+        name, n_sample=None
+) -> Tuple[
+    GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling, TrainingArguments,
+    Dataset, Dataset, Trainer
+]:
+    model_, tokenizer_, data_collator_ = get_model_n_tokenizer(name)
+    train_args_ = get_train_setup(name)
+    dset_tr_, dset_vl_ = get_dset(
+        map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'], n_sample=n_sample, random_seed=seed
+    )
+    trainer_ = CustomTrainer(
+        model=model_,
+        args=train_args_,
+        data_collator=data_collator_,
+        train_dataset=dset_tr_,
+        eval_dataset=dset_vl_,
+        compute_metrics=compute_metrics
+    )
+    trainer_.add_callback(MyLoggingCallback(trainer_, interactive=False))
+    return model_, tokenizer_, data_collator_, train_args_, dset_tr_, dset_vl_, trainer_
+
+
 class TrainPlot:
     """
     An interactive matplotlib graph to log metrics during training
@@ -214,7 +246,7 @@ class TrainPlot:
 
         self.train_args = train_args
         lr, bsz, n_ep = train_args.learning_rate, train_args.per_device_train_batch_size, train_args.num_train_epochs
-        self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, epochs=${n_ep}$'
+        self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, #epochs=${n_ep}$'
         self.title_save = f'{title}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
     def make_plot(self):
@@ -306,6 +338,7 @@ class MyLoggingCallback(TrainerCallback):
 
         self.mode = mode
         self.train_begin, self.train_end = None, None
+        self.t_strt, self.t_end = None, None
 
         self.interactive = interactive
         self.plot = TrainPlot(title=name, train_args=trainer.args, save_plot=save_plot)
@@ -317,6 +350,12 @@ class MyLoggingCallback(TrainerCallback):
         self.mode = mode
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
+        args = self.parent_trainer.args
+        lr, bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
+        self.logger.info(f'Training started with '
+                         f'learning rate: {logi(lr)}, batch size: {logi(bsz)}, #epochs: {logi(n_ep)}... ')
+        self.t_strt = datetime.datetime.now()
+
         self.mode = 'train'
         self.train_begin = True
         if self.interactive:
@@ -326,6 +365,10 @@ class MyLoggingCallback(TrainerCallback):
         if self.train_begin:
             self.train_begin = False
             self.train_end = True
+
+            self.t_end = datetime.datetime.now()
+            self.logger.info(f'Training completed in {logi(fmt_dt(self.t_end - self.t_strt))} ')
+
             if self.interactive:
                 self.plot.finish()
             else:  # If didn't show plot before
@@ -347,6 +390,10 @@ class MyLoggingCallback(TrainerCallback):
             self.log_hist.append(d_out)
             if self.interactive:
                 self.plot.update(self.log_hist)
+
+        def log_dict(d: Dict) -> str:
+            pairs = (f'{k}: {logi(v)}' for k, v in d.items())
+            return f'{{{", ".join(pairs)}}}'
 
         if state.is_local_process_zero:
             if self.mode == 'train':
@@ -396,13 +443,13 @@ class MyLoggingCallback(TrainerCallback):
                         log_update(out)
                         self.out_dict = None
                 elif any('runtime' in k for k in logs.keys()):
-                    self.logger.info(logs)
+                    self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
                 else:
                     print('unhandled case')
                     exit(1)
             else:
                 if 'src' not in logs:  # Skip custom compute_loss logging
-                    self.logger.info(logs)
+                    self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
 
 
 class CustomTrainer(Trainer):
@@ -465,23 +512,8 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm = 'debug'
-    model, tokenizer, data_collator = get_model_n_tokenizer(nm)
-    train_args = get_train_setup(nm)
-    dset_tr, dset_vl = get_dset(
-        map_func=tokenize_func(tokenizer), remove_columns=['label', 'text'], n_sample=32, random_seed=seed
-    )
-
-    trainer = CustomTrainer(
-        model=model,
-        args=train_args,
-        data_collator=data_collator,
-        train_dataset=dset_tr,
-        eval_dataset=dset_vl,
-        compute_metrics=compute_metrics
-    )
-    cb = MyLoggingCallback(trainer, interactive=False)
-    trainer.add_callback(cb)
+    nm, n = 'debug', 8
+    model, tokenizer, data_collator, train_args, dset_tr, dset_vl, trainer = get_all_setup(nm, n_sample=n)
     trainer.train()
-    trainer.evaluate()
     trainer.save_model(os.path.join(trainer.args.output_dir, now(sep='-')))
+    trainer.evaluate()

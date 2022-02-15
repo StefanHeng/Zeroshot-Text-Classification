@@ -4,7 +4,7 @@ import json
 import math
 import logging
 from typing import Union, Tuple
-from datetime import datetime
+import datetime
 from functools import reduce
 from collections import OrderedDict
 
@@ -74,8 +74,24 @@ def config(attr):
 
 
 def now(as_str=True, sep=':'):
-    d = datetime.now()
+    d = datetime.datetime.now()
     return d.strftime(f'%Y-%m-%d %H{sep}%M{sep}%S') if as_str else d  # Considering file output path
+
+
+def fmt_dt(secs: Union[int, float, datetime.timedelta]):
+    if isinstance(secs, datetime.timedelta):
+        secs = secs.seconds + (secs.microseconds/1e6)
+    if secs >= 86400:
+        d = secs // 86400  # // floor division
+        return f'{round(d)}d{fmt_dt(secs-d*86400)}'
+    elif secs >= 3600:
+        h = secs // 3600
+        return f'{round(h)}h{fmt_dt(secs-h*3600)}'
+    elif secs >= 60:
+        m = secs // 60
+        return f'{round(m)}m{fmt_dt(secs-m*60)}'
+    else:
+        return f'{round(secs)}s'
 
 
 def log(s, c: str = 'log', c_time='green', as_str=False):
