@@ -3,7 +3,7 @@ import sys
 import json
 import math
 import logging
-from typing import Union
+from typing import Union, Tuple
 from datetime import datetime
 from functools import reduce
 from collections import OrderedDict
@@ -126,7 +126,7 @@ def logi(s):
     return logs(s, c='i')
 
 
-def hex2rgb(hx: str) -> Union[tuple[int], tuple[float]]:
+def hex2rgb(hx: str) -> Union[Tuple[int], Tuple[float]]:
     # Modified from https://stackoverflow.com/a/62083599/10732321
     if not hasattr(hex2rgb, 'regex'):
         hex2rgb.regex = re.compile(r'#[a-fA-F0-9]{3}(?:[a-fA-F0-9]{3})?$')

@@ -24,7 +24,7 @@ def get_dset(
         dnm='ag_news',
         map_func: Callable = None, remove_columns: Union[str, List[str]] = None,
         n_sample: int = None, random_seed: int = None
-) -> tuple[Dataset, ...]:
+) -> Tuple[Dataset, ...]:
     dset = load_dataset(dnm)
     tr, vl = dset['train'], dset['test']
     if n_sample is not None:
@@ -55,7 +55,8 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
 
     # TODO: support pre-training task, variable option sizes?
     q, t, a = (SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_ans'))
-    eos = tokenizer.eos_token
+    eos = tokenizer_.eos_token
+    # ic(tokenizer.pad_token_id)
 
     def _tokenize_func(sample: Dict[str, List]):
         """
@@ -71,7 +72,7 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
             # No special token is added by tokenizer
             gen = (tokenizer_(elm) for elm in parts)  # Get lists for now
             ids_, msks_ = zip(*((d['input_ids'], d['attention_mask']) for d in gen))
-            return sum(ids_, start=[]), sum(msks_, start=[])
+            return sum(ids_, []), sum(msks_, [])  # Keyword `start` omitted for python3.6 colab compatibility
 
         def single_sample2str(i, cont: str, lb: int):
             strs_lb = ' , '.join(f'" {lb2feat_full[idx]} "' for idx in idx_lbs[i])
@@ -85,24 +86,25 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
             single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
         ]
         ids, msks = zip(*((i, m) for i, m in ids_n_msks))
-        for txt, label, row in zip(sample['text'], sample['label'], ids):
-            print(txt)
-            print(label)
-            print(' '.join(tokenizer_.decode(i) for i in row))
-            print()
-        exit(1)
+        # for txt, label, row in zip(sample['text'], sample['label'], ids):
+        #     print(txt)
+        #     print(label)
+        #     print(' '.join(tokenizer_.decode(i) for i in row))
+        #     print()
+        # exit(1)
 
         def pad(ints: List[List[int]], int_pad):
             # Pad to max_length, truncate if necessary
-            lst = [l[:max_length] if len(l) > max_length else (l + [int_pad] * max_length-len(l)) for l in ints]
+            lst = [l[:max_length] if len(l) > max_length else (l + [int_pad] * (max_length-len(l))) for l in ints]
             return lst
-        return BatchEncoding(  # -100 for ignoring the label; 0 for masked positions in attention
-            dict(input_ids=pad(ids, int_pad=-100), attention_mask=pad(msks, int_pad=0))
+        return BatchEncoding(
+            # `pad_token_id` will be ignored per `DataCollatorForLanguageModeling`; 0 for masked positions in attention
+            dict(input_ids=pad(ids, int_pad=tokenizer_.pad_token_id), attention_mask=pad(msks, int_pad=0))
         )
     return _tokenize_func
 
 
-def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling]:
+def get_model_n_tokenizer(name='gpt2') -> Tuple[GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling]:
     """
     :param name: Model name, one of [`debug`, `gpt2`, `gpt2-medium`]
     """
@@ -110,7 +112,7 @@ def get_model_n_tokenizer(name='gpt2') -> tuple[GPT2LMHeadModel, GPT2TokenizerFa
 
     conf = AutoConfig.from_pretrained('gpt2')
     if name == 'debug':  # Try a smaller model for training sanity check
-        n_token = 4
+        n_token = 128
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
         model_ = GPT2LMHeadModel(config=conf)
@@ -134,7 +136,7 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
             batch_size=4,
             weight_decay=1e-2,
             # num_train_epochs=128,
-            num_train_epochs=4,
+            num_train_epochs=32,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -177,7 +179,8 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
         logging_steps=1,
         fp16=torch.cuda.is_available(),  # TODO: dynamic loss scaling??
         optim=OptimizerNames.ADAMW_TORCH,
-        disable_tqdm=True
+        disable_tqdm=True,
+        report_to='none'
     )
 
 
@@ -280,10 +283,21 @@ class MyLoggingCallback(TrainerCallback):
         """
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
-        handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
-        handler.setLevel(logging.DEBUG)
-        handler.setFormatter(MyFormatter())
-        self.logger.addHandler(handler)
+        from icecream import ic
+        # ic(self.logger.handlers)
+        had_handler = False
+        for hd in self.logger.handlers:
+            if hasattr(hd, 'name_for_my_logging') and getattr(hd, 'name_for_my_logging') == name:
+                # ic(hd, vars(hd))
+                had_handler = True
+        if not had_handler:
+            handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
+            handler.setLevel(logging.DEBUG)
+            handler.setFormatter(MyFormatter())
+            # For ipython compatibility, potentially update it instead of adding new handler
+            setattr(handler, 'name_for_my_logging', name)
+            self.logger.addHandler(handler)
+        # self.logger.propagate = False
 
         self.out_dict: Dict = None
         self.parent_trainer = trainer
@@ -351,7 +365,8 @@ class MyLoggingCallback(TrainerCallback):
                             # Training step in range (1, total steps); Epoch troublesome to calculate TODO
                             # Prep for Trainer internal evaluation call
                             self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
-                            out = self.out_dict | dict(eval_acc=vl_acc, eval_loss=vl_loss)
+                            # python3.6 compatibility
+                            out = {**self.out_dict, **dict(eval_acc=vl_acc, eval_loss=vl_loss)}
                             log_update(out)
                     else:  # Need to look for the accuracy calculated for the training batch
                         acc, loss = logs.get('acc', None), logs.get('loss', None)
@@ -376,7 +391,8 @@ class MyLoggingCallback(TrainerCallback):
                         assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
                         assert step == self.out_dict['step']
                         assert n_ep_ == self.out_dict['epoch']
-                        out = self.out_dict | dict(eval_loss=vl_loss, eval_acc=vl_acc)
+                        # python3.6 compatibility
+                        out = dict(**self.out_dict, **dict(eval_loss=vl_loss, eval_acc=vl_acc))
                         log_update(out)
                         self.out_dict = None
                 elif any('runtime' in k for k in logs.keys()):
@@ -453,7 +469,7 @@ if __name__ == '__main__':
     model, tokenizer, data_collator = get_model_n_tokenizer(nm)
     train_args = get_train_setup(nm)
     dset_tr, dset_vl = get_dset(
-        map_func=tokenize_func(tokenizer, max_length=128), remove_columns=['label', 'text'], n_sample=8, random_seed=seed
+        map_func=tokenize_func(tokenizer), remove_columns=['label', 'text'], n_sample=32, random_seed=seed
     )
 
     trainer = CustomTrainer(
@@ -467,5 +483,5 @@ if __name__ == '__main__':
     cb = MyLoggingCallback(trainer, interactive=False)
     trainer.add_callback(cb)
     trainer.train()
-    ic(trainer.evaluate())
+    trainer.evaluate()
     trainer.save_model(os.path.join(trainer.args.output_dir, now(sep='-')))
