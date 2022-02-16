@@ -1,13 +1,14 @@
-from collections import defaultdict
 from typing import List, Callable
+from collections import defaultdict
 
 import pandas as pd
 from torch import nn
 import transformers
 # LMHead for training
 from transformers import BatchEncoding
-from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast, GPT2Model
+from transformers import AutoConfig
+from transformers import PreTrainedTokenizerBase, GPT2TokenizerFast
+from transformers import GPT2Model, GPT2LMHeadModel
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
 from transformers import DataCollatorForLanguageModeling
 from transformers.training_args import OptimizerNames
@@ -28,8 +29,13 @@ def get_dset(
         tr = tr.select(range(n_sample))
         vl = vl.select(range(n_sample))
     if map_func is not None:
+        ic(tr.features)
         tr = tr.map(map_func, batched=True, remove_columns=remove_columns)
         vl = vl.map(map_func, batched=True, remove_columns=remove_columns)
+
+        tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
+        vl = vl.remove_columns('dataset_name')
+        ic(tr.features)
     if random_seed:
         tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
     return tr, vl
@@ -47,16 +53,21 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         ('type_text', '[TEXT]'),
         ('type_answ', '[ANSW]')
     ])
+    DSET_IDS = dict(  # For text-classification accuracy
+        ag_news=0
+    )
 
-    def __init__(self, name: str = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # self.name = name  # Model name, for debugging
         # Pad token cannot be `self.eos_token`
         # cos otherwise `DataCollatorForLanguageModeling` would override normal eos tokens
-        self.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=list(ZsGPT2Tokenizer.SPEC_TOKS.values())))
-        for i in range(50254, 50266):  # Sanity check
-            ic(i, self.decode(i))
-        ic(self.pad_token)
+        self.add_special_tokens(dict(
+            pad_token='[PAD]', additional_special_tokens=list(ZsGPT2Tokenizer.SPEC_TOKS.values())
+        ))
+        # for i in range(50254, 50266):  # Sanity check
+        #     ic(i, self.decode(i))
+        # ic(self.pad_token)
         # exit(1)
 
         self.templates = config('baselines.gpt2-0shot.templates')
@@ -69,8 +80,16 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('type_ques', 'type_text', 'type_answ')
         )  # Type tokens
 
-    def call_paren(self, s: str, **kwargs) -> List[int]:
+    def _call_paren(self, s: str, **kwargs) -> List[int]:
         return super().__call__(s, **kwargs)['input_ids']
+
+    def enc_spec(self, tok: str) -> int:
+        """
+        Encode special tokens with sanity check
+        """
+        id_ = self.encode(tok)
+        assert len(id_) == 1
+        return id_[0]  # Intended for special tokens
 
     def __call__(self, samples: Dict[str, Union[List, str, int]], **kwargs):
         """
@@ -81,12 +100,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         is_batched = isinstance(samples['label'], (tuple, list))
         if max_length is None:
             max_length = self.model_max_length
-        ic(max_length)
-        # if 'debug' in self.name:
-        #     n_token = max_length
-        # n_token = self.max_model_input_sizes['gpt2']  # Indented number of token positions as in vanilla GPT2 model
-        n_token = self.model_max_length
-        ic(n_token)
+        n_token = self.model_max_length  # Indented number of token positions as in the actual architecture
 
         ln = len(samples['label'])
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
@@ -113,24 +127,20 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             question = self.templates[idxs_tpl[i]].format(strs_lb)
             answer = lb2feat_str[label]
 
-            def enc_spec(tok: str) -> int:
-                id_ = self.encode(tok)
-                assert len(id_) == 1
-                return id_[0]  # Intended for special tokens
-            ids_ques = self.call_paren(question, **kwargs)
-            ids_text = self.call_paren(text, **kwargs)
-            ids_answ = self.call_paren(answer, **kwargs)
+            ids_ques = self._call_paren(question, **kwargs)
+            ids_text = self._call_paren(text, **kwargs)
+            ids_answ = self._call_paren(answer, **kwargs)
             # Number of contex tokens, up until answer token, inclusive
             n_ques, n_text, n_answ = (1 + len(ids_ques) + 1), (1 + len(ids_text) + 1), (1 + len(ids_answ) + 1)
             n_cont = n_ques + n_text + 1
             ids = [
-                enc_spec(self.ques_token), *ids_ques, enc_spec(self.eos_token),
-                enc_spec(self.text_token), *ids_text, enc_spec(self.eos_token),
-                enc_spec(self.answ_token), *ids_answ, enc_spec(self.eos_token)
+                self.enc_spec(self.ques_token), *ids_ques, self.enc_spec(self.eos_token),
+                self.enc_spec(self.text_token), *ids_text, self.enc_spec(self.eos_token),
+                self.enc_spec(self.answ_token), *ids_answ, self.enc_spec(self.eos_token)
             ]
-            tids = [enc_spec(self.ques_type_token)] * n_ques + \
-                   [enc_spec(self.text_type_token)] * n_text + \
-                   [enc_spec(self.answ_type_token)] * n_answ
+            tids = [self.enc_spec(self.ques_type_token)] * n_ques + \
+                   [self.enc_spec(self.text_type_token)] * n_text + \
+                   [self.enc_spec(self.answ_type_token)] * n_answ
             msks = [1] * len(ids)  # Encode ids are attended for CLM
             # Context position ids, followed by output position ids
             # adding `n_token` offset for the modified positional embeddings, see `ZsGPT2Model`
@@ -144,32 +154,27 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 if name == 'attention_mask':
                     int_pad = 0  # Ignore in attention
                 elif name == 'position_ids':
-                    int_pad = 0  # Arbitrary, since will be ignored
+                    # Arbitrary, since will be ignored, but needs to be within `n_token` for embedding mapping
+                    int_pad = 0
                 else:
                     # `input_id`s set to `pad_token` will be ignored by `DataCollatorForLanguageModeling`
-                    int_pad = enc_spec(self.pad_token)
+                    int_pad = self.enc_spec(self.pad_token)
                 return ints[:max_length] if len(ints) > max_length else (ints + [int_pad] * (max_length - len(ints)))
-            return {k: pad(ints, k) for k, ints in ((
+            out = {k: pad(ints, k) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
-            # print(text)  # Sanity check
-            # print(label)
-            # for k, v in out.items():
-            #     if 'position' in k or 'mask' in k:
-            #         toks = [f'{str(i):>15}' for i in v]
-            #     else:
-            #         toks = [f'{self.decode(i):>15}' for i in v]
-            #     print(f'{k:>20}:', ' '.join(toks))
-            # print()
-            # exit(1)
-            # return out
+            out['dataset_id'] = ZsGPT2Tokenizer.DSET_IDS[dnm]  # For computing zero-shot classification accuracy
+            ic(out)
+            return out
         if is_batched:
             ds = [call_single(i, dnm, txt, lb) for i, (dnm, txt, lb) in enumerate(zip(
                 *[samples[k] for k in ['dataset_name', 'text', 'label']]
             ))]
-            # ic({k: [d[k] for d in ds] for k in ds[0]})
+            ic({k: [d[k] for d in ds] for k in ds[0]})
             return BatchEncoding({k: [d[k] for d in ds] for k in ds[0]})  # Stack all the ids
         else:
+            out = BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_name', 'text', 'label']]))
+            ic('single', out)
             return BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_name', 'text', 'label']]))
 
 
@@ -182,9 +187,7 @@ class ZsGPT2Model(GPT2Model):
         # Override internal state
         # Double the positional embedding matrix, as if stacking the context & output embedding matrices together
         # See positional id assignment in `ZsGPT2Tokenizer`
-        ic(self.wpe.weight.shape)
         self.wpe = nn.Embedding(config.max_position_embeddings*2, self.embed_dim)
-        ic(self.wpe.weight.shape)
 
 
 class ZsGPT2LMHeadModel(GPT2LMHeadModel):
@@ -194,11 +197,13 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
     def __init__(self, config):
         super().__init__(config)
         self.transformer = ZsGPT2Model(config)  # Override internal state
-        ic(self.transformer.wpe.weight.shape)
+
+    def forward(self, dataset_id=None, **kwargs):
+        # Ignore, not need in learning; Just need to pass value for evaluation
+        return super().forward(**kwargs)
 
 
 def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
-
     def _tokenize_func(sample: Dict[str, List]):
         """
         :param sample: A batch of data samples
@@ -208,7 +213,7 @@ def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
     return _tokenize_func
 
 
-def get_model_n_tokenizer(name='gpt2') -> Tuple[GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling]:
+def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokenizer, DataCollatorForLanguageModeling]:
     """
     :param name: Model name, one of [`debug`, `gpt2`, `gpt2-medium`]
     """
@@ -223,7 +228,6 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[GPT2LMHeadModel, GPT2TokenizerFa
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
         model_ = ZsGPT2LMHeadModel(config=conf)
-        # model_ = GPT2LMHeadModel(config=conf)
     else:
         model_nm = MODEL_NMS['small']  # TODO: reduce max seq len to 512 as in paper
         model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm)
@@ -245,10 +249,10 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'debug-large': dict(
-            learning_rate=1e-4,
+            learning_rate=5e-5,
             batch_size=32,
             weight_decay=1e-2,
-            num_train_epochs=16,
+            num_train_epochs=4,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'gpt2': dict(
@@ -292,6 +296,8 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
         fp16=torch.cuda.is_available(),  # TODO: dynamic loss scaling??
         optim=OptimizerNames.ADAMW_TORCH,
         disable_tqdm=True,
+        # Pass dataset name information down to `compute_loss` for computing text classification accuracy
+        remove_unused_columns=False,
         report_to='none'
     )
 
@@ -314,9 +320,15 @@ def get_all_setup(
     model_, tokenizer_, data_collator_ = get_model_n_tokenizer(name)
     train_args_ = get_train_setup(name)
     dset_tr_, dset_vl_ = get_dset(
-        map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'], n_sample=n_sample, random_seed=random_seed
+        map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'],
+        n_sample=n_sample, random_seed=random_seed
     )
+    ic(dset_tr_)
+    # for d in dset_tr_:
+    #     ic(d)
+    #     exit(1)
     trainer_ = CustomTrainer(
+        tokenizer=tokenizer_,
         model=model_,
         args=train_args_,
         data_collator=data_collator_,
@@ -334,7 +346,7 @@ class TrainPlot:
     """
     def __init__(
             self,
-            title='Transformer Training', train_args: TrainingArguments = None,
+            title='Transformer Training', train_args: TrainingArguments = None, meta: Dict = None,
             interactive=True, save_plot=True
     ):
         self.title = title
@@ -348,7 +360,11 @@ class TrainPlot:
         self.c_tr, self.c_vl = self.colors[0], self.colors[3]
 
         self.train_args = train_args
-        lr, bsz, n_ep = train_args.learning_rate, train_args.per_device_train_batch_size, train_args.num_train_epochs
+        self.meta = meta
+        n_data, md_sz, lr, bsz, n_ep = (
+            meta[k] for k in ('#data', 'model size', 'learning rate', 'batch size', '#epochs')
+        )
+        # lr, bsz, n_ep = train_args.learning_rate, train_args.per_device_train_batch_size, train_args.num_train_epochs
         self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, #epochs=${n_ep}$'
         self.title_save = f'{title}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
@@ -411,19 +427,16 @@ class MyLoggingCallback(TrainerCallback):
             - Intended for coupled training and evaluation
         - Accuracy as a metric is passed to `Trainer` and training metric computed in `compute_loss` and logged
     """
-    def __init__(self, trainer: Trainer, name='GPT-2 Training', mode='train', interactive=True, save_plot=True):
+    def __init__(self, parent_trainer: Trainer, name='GPT-2 Training', mode='train', interactive=True, save_plot=True):
         """
-        :param trainer: The parent Trainer
+        :param parent_trainer: The parent Trainer
         :param name: Logger name
         """
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
-        from icecream import ic
-        # ic(self.logger.handlers)
         had_handler = False
         for hd in self.logger.handlers:
             if hasattr(hd, 'name_for_my_logging') and getattr(hd, 'name_for_my_logging') == name:
-                # ic(hd, vars(hd))
                 had_handler = True
         if not had_handler:
             handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
@@ -432,10 +445,16 @@ class MyLoggingCallback(TrainerCallback):
             # For ipython compatibility, potentially update it instead of adding new handler
             setattr(handler, 'name_for_my_logging', name)
             self.logger.addHandler(handler)
-        # self.logger.propagate = False
 
         self.out_dict: Dict = None
-        self.parent_trainer = trainer
+        self.parent_trainer = parent_trainer
+        args, dset, md = (getattr(parent_trainer, k) for k in ['args', 'train_dataset', 'model'])
+        lr, bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
+        self.train_meta = OrderedDict([
+            ('#data', len(dset)), ('model size', md.config.n_positions),
+            ('learning rate', lr), ('batch size', bsz), ('#epochs', n_ep)
+        ])
+        self.steps = math.ceil(len(dset) // bsz) * n_ep
         self.called_val_init = False
         self.log_hist: List[Dict] = []
 
@@ -444,7 +463,7 @@ class MyLoggingCallback(TrainerCallback):
         self.t_strt, self.t_end = None, None
 
         self.interactive = interactive
-        self.plot = TrainPlot(title=name, train_args=trainer.args, save_plot=save_plot)
+        self.plot = TrainPlot(title=name, train_args=parent_trainer.args, meta=self.train_meta, save_plot=save_plot)
 
     def set_mode(self, mode: str):
         """
@@ -453,11 +472,7 @@ class MyLoggingCallback(TrainerCallback):
         self.mode = mode
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
-        args = self.parent_trainer.args
-        lr, bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
-        d = OrderedDict([('learning rate', lr), ('batch size', bsz), ('#epochs', n_ep)])
-        self.logger.info(f'Training started with {log_dict(d)}')
-                         # f'learning rate: {logi(lr)}, batch size: {logi(bsz)}, #epochs: {logi(n_ep)}... ')
+        self.logger.info(f'Training started with {log_dict(self.train_meta)}')
         self.t_strt = datetime.datetime.now()
 
         self.mode = 'train'
@@ -482,7 +497,7 @@ class MyLoggingCallback(TrainerCallback):
     def on_log(self, args: TrainingArguments, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
             keys_ = ['step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc']
-            fmt = [':>4', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
+            fmt = [f':>{len(str(self.steps))}', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
             s_fmts = [f'{{{k}{fmt_}}}' for k, fmt_ in zip(keys_, fmt)]  # Enforce ordering
 
             d = {k: (('loss' in k and round(v, 4)) or ('acc' in k and round(v*100, 4)) or v) for k, v in d.items()}
@@ -553,14 +568,16 @@ class MyLoggingCallback(TrainerCallback):
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, tokenizer: ZsGPT2Tokenizer = None, **kwargs):
+        super().__init__(**kwargs)
         # assert 'args' in kwargs and 'callbacks' in kwargs
         # Expect a custom logging callback passed in to **replace** the internal callback
         callbacks = self.callback_handler.callbacks
         self.callback_handler.callbacks = [
             c for c in callbacks if str(c.__class__) != "<class 'transformers.trainer_callback.PrinterCallback'>"
         ]
+
+        self.tokenizer = tokenizer  # TODO: generalize to more tokenizers?
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -577,9 +594,27 @@ class CustomTrainer(Trainer):
         outputs = model(**inputs)
 
         # ========================== Begin of added ==========================
+        inputs: Dict[str, torch.Tensor]
         if 'labels' in inputs:
-            preds = outputs.logits.detach()
-            matches: torch.Tensor = (preds.argmax(axis=-1) == inputs['labels'])
+            preds = outputs.logits.detach().argmax(axis=-1)
+
+            id_att = self.tokenizer.enc_spec(self.tokenizer.answ_type_token)
+            ic(inputs)
+            # ic(outputs)
+            ic(preds)
+            # idxs_att = (inputs['token_type_ids'] == id_att).nonzero()  # matches is sorted tuples
+            # For each unique row/sample with answer tokens present, check if it forms a label, then
+            # sample2idxs: Dict[int, List[int]] = {i_sample: inputs[''] [(row == id_att).nonzero()]}
+            # for row in inputs['token_type_ids']:
+            #     ic((row == id_att).nonzero())
+            # idxs = idxs_att[:, 0].unique(sorted=True, return_inverse=True)
+            # sample2idxs = defaultdict(list)
+            # for i_sample, idx in idxs_att:
+            #     sample2idxs[i_sample].append(idx)
+            # ic(idxs_att, idxs)
+            # exit(1)
+
+            matches: torch.Tensor = (preds == inputs['labels'])
             d_log = dict(src='compute_loss', acc=round((matches.sum() / matches.numel()).item(), 4))
         # ========================== End of added ==========================
 
@@ -612,9 +647,9 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    # nm, n = 'debug', 8
-    nm, n = 'debug-large', 8
-    model, tokenizer, data_collator, train_args, dset_tr, dset_vl, trainer = get_all_setup(
+    nm, n = 'debug', 8
+    # nm, n = 'debug-large', 32
+    model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
     trainer.train()
