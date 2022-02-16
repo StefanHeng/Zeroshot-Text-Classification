@@ -1,5 +1,4 @@
 from typing import List, Callable
-from collections import defaultdict
 
 import pandas as pd
 from torch import nn
@@ -15,7 +14,7 @@ from transformers.training_args import OptimizerNames
 from datasets import load_dataset, Dataset
 from datasets import load_metric
 
-from unified_encoder.util import *
+from zeroshot_biencoder.util import *
 
 
 def get_dset(
@@ -82,7 +81,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # self.name = name  # Model name, for debugging
         # Pad token cannot be `self.eos_token`
         # cos otherwise `DataCollatorForLanguageModeling` would override normal eos tokens
         self.add_special_tokens(dict(
@@ -129,21 +127,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(i, dnm, text, label):
-            ic('inside call single')
             assert dnm == 'ag_news'  # Potentially support dynamic dataset
-            # if dnm not in self.cache:
-            #     feats = load_dataset(dnm, split='train').features['label']  # Pick a split arbitrarily
-            #     feat2feat_full = {
-            #         'World': 'World News',
-            #         'Sports': 'Sports',
-            #         'Business': 'Business',
-            #         'Sci/Tech': 'Science & Technology'
-            #     }
-            #     n_cls = feats.num_classes
-            #     lb2feat_str: List[str] = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
-            #     self.cache[dnm] = dict(n_classes=n_cls, label2feature_str=lb2feat_str)
-            #     ic('inside call single', self.cache)
-            # else:
             n_cls, lb2feat_str = (self.cache[dnm][k] for k in ('n_classes', 'label2feature_str'))
 
             idx_lbs = np.arange(n_cls)
@@ -544,6 +528,7 @@ class MyLoggingCallback(TrainerCallback):
             Convert `classification_acc_meta` dict to stats for logging
             """
             n_acc, n_total, n_mis = (d_stats[k] for k in ('n_acc', 'n_total', 'n_missing'))
+            # ic(n_mis, n_sample, n_mis/n_sample, prefix)
             return {
                 f'{prefix}_acc_cls': n_acc/n_total if n_total != 0 else 0,
                 f'{prefix}_acc_mis': n_mis/n_sample  # As a fraction
@@ -553,14 +538,9 @@ class MyLoggingCallback(TrainerCallback):
             stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
             # ic(stats_cls_acc)
             stats_cls_acc: Dict = {k: sum(d[k] for d in stats_cls_acc) for k in stats_cls_acc[0]}
-            # ic(stats_cls_acc, self.out_dict)
             self.out_dict = {
                 **self.out_dict,
                 **cls_stats2dict(stats_cls_acc, self.n_eval, prefix='eval')
-                # **dict(
-                #     eval_acc_cls=stats_cls_acc['n_acc'] / stats_cls_acc['n_total'],
-                #     eval_cls_mis=stats_cls_acc['n_missing'] / self.n_eval
-                # )
             }
 
         if state.is_local_process_zero:
@@ -579,10 +559,12 @@ class MyLoggingCallback(TrainerCallback):
                                 **dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss,),
                                 **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
                             }
+                            # ic(self.out_dict)
 
                             # Prep for Trainer internal evaluation call
                             self.is_compute_loss_on_train = False
                             out: Dict = self.parent_trainer.evaluate()  # Expanded to branch below then comes back
+                            # self.is_compute_loss_on_train = True  # Disable, for edge case training step
                             n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in ('epoch', 'eval_accuracy', 'eval_loss'))
                             assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
                             assert n_ep == n_ep_ and n_ep == 0
@@ -593,14 +575,12 @@ class MyLoggingCallback(TrainerCallback):
                             # del out[self.k_cls_eval]
                             # ic(self.out_dict)
                             log_update(self.out_dict)
-                            self.is_compute_loss_on_train = True
                         elif not self.is_compute_loss_on_train:  # `compute_loss` ran on evaluation set
                             # => Keep track of the batch-wise classification accuracy
                             if self.k_cls_eval not in self.out_dict:
                                 self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
                             else:
                                 self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
-
                     else:  # Need to look for the accuracy calculated for the training batch
                         # Heuristic: 1st call to `compute_loss` corresponds to training
                         if self.is_compute_loss_on_train:
@@ -613,11 +593,13 @@ class MyLoggingCallback(TrainerCallback):
                                     **dict(step=step, train_acc=acc, train_loss=loss),
                                     **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
                                 }
+                                # ic(self.out_dict)
                         else:  # On eval set, keep track like above
                             if self.k_cls_eval not in self.out_dict:
                                 self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
                             else:
                                 self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
+                            # ic(self.out_dict[self.k_cls_eval])
                 elif 'loss' in logs:  # Internal training log
                     # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
                     # But log anyway, for after gradient update, evaluation loss changes
@@ -638,10 +620,7 @@ class MyLoggingCallback(TrainerCallback):
                         # python3.6 compatibility
                         self.out_dict.update(dict(eval_loss=vl_loss, eval_acc=vl_acc))
 
-                        # stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
-                        # ic(stats_cls_acc)
                         set_eval_cls_acc()
-                        # del out[self.k_cls_eval]
                         log_update(self.out_dict)
                         self.out_dict = None
                         self.is_compute_loss_on_train = True
@@ -691,59 +670,34 @@ class CustomTrainer(Trainer):
             id_att = self.tokenizer.enc_spec(self.tokenizer.answ_type_token)
             id_answ = self.tokenizer.enc_spec(self.tokenizer.answ_token)
             id_eos = self.tokenizer.enc_spec(self.tokenizer.eos_token)
-            # ic(inputs)
-            # ic(outputs)
-            # ic(preds)
-            # idxs_att = (inputs['token_type_ids'] == id_att).nonzero()  # matches is sorted tuples
-            # For each unique row/sample with answer tokens present, check if it forms a label
             sample2idxs: Dict[int, List[int]] = {
-                # i_sample: list(inputs['input_ids'][i_sample][(row == id_att).nonzero().flatten()])
                 i_sample: (row == id_att).nonzero().flatten().tolist()
-                # i_sample: (row == id_att).nonzero().flatten()
                 for i_sample, row in enumerate(inputs['token_type_ids'])
             }
-            # sample2ids = {i_sample: inputs['input_ids'][i_sample, v].tolist() for i_sample, v in sample2idxs.items()}
-            # ic(sample2idxs, sample2ids)
-            # id_ques = self.tokanizer.enc_spec(self.tokenizer.ques_token)
-            # assert all(idxs[0] == id_att for idxs in sample2idxs.values())
-            # sample2idxs = {k: v[1:(-1 if v[-1] == id_eos else None)] for k, v in sample2idxs.items()}
-            # ic(sample2idxs)
-            # ic(sample2idxs)
 
+            # For each unique row/sample with answer tokens present, check if it forms a classification label string
             def get_labels(i, idxs_):
                 if idxs_:
                     lbs = inputs['input_ids'][i, idxs_].tolist()
                     assert lbs[0] == id_answ  # Remove answer special prefix token & potentially the ending token
                     idxs_, lbs = idxs_[1:], lbs[1:]
-                    # ic(idxs, labels)
                     if lbs:  # Labels are still available
                         if lbs[-1] == id_eos:
                             idxs_, lbs = idxs_[:-1], lbs[:-1]
-
                         dnm = self.tokenizer.ID2DNM[inputs['dataset_id'][i].item()]
-                        # ic(self.tokenizer.cache)
                         lb2feat_str: List[str] = self.tokenizer.cache[dnm]['label2feature_str']
-
                         if self.tokenizer.decode(lbs) in lb2feat_str:
                             return dict(idxs=idxs_, labels=lbs)
 
             sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
-            sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
-
             # ic(sample2idxs_n_lbs)
+            sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
             d_log['classification_acc_meta'] = dict(
+                # if prediction is also the label
                 n_acc=sum(preds[i_sample, d['idxs']] == d['labels'] for i_sample, d in sample2idxs_n_lbs.items()),
                 n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
                 n_missing=inputs['input_ids'].shape[0]-len(sample2idxs_n_lbs)
             )
-            # ic(d_log)
-            # exit(1)
-            # If so, check if prediction is also the label
-            # for row in inputs['token_type_ids']:
-            #     ic((row == id_att).nonzero())
-            # idxs = idxs_att[:, 0].unique(sorted=True, return_inverse=True)
-            # sample2idxs = defaultdict(list)
-
         # ========================== End of added ==========================
 
         # Save past state if it exists
@@ -770,13 +724,13 @@ class CustomTrainer(Trainer):
 if __name__ == '__main__':
     from icecream import ic
 
-    from unified_encoder.util import *
+    from zeroshot_biencoder.util import *
 
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm, n = 'debug', 8
-    # nm, n = 'debug-large', 32
+    nm, n = 'debug', 16
+    # nm, n = 'debug-large', 128
     model, tokenizer, data_collator, tr_args, dset_tr_, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
