@@ -3,7 +3,7 @@ import sys
 import json
 import math
 import logging
-from typing import Union, Tuple
+from typing import Union, Tuple, Dict
 import datetime
 from functools import reduce
 from collections import OrderedDict
@@ -140,6 +140,16 @@ def logi(s):
     Syntactic sugar for logging `info` as string
     """
     return logs(s, c='i')
+
+
+def log_dict(d: Dict = None, **kwargs) -> str:
+    """
+    Syntactic sugar for logging dict as string
+    """
+    if d is None:
+        d = kwargs
+    pairs = (f'{k}: {logi(v)}' for k, v in d.items())
+    return logs('{', c='m') + ', '.join(pairs) + logs('}', c='m')
 
 
 def hex2rgb(hx: str) -> Union[Tuple[int], Tuple[float]]:
