@@ -29,13 +29,11 @@ def get_dset(
         tr = tr.select(range(n_sample))
         vl = vl.select(range(n_sample))
     if map_func is not None:
-        ic(tr.features)
         tr = tr.map(map_func, batched=True, remove_columns=remove_columns)
         vl = vl.map(map_func, batched=True, remove_columns=remove_columns)
 
         tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
         vl = vl.remove_columns('dataset_name')
-        ic(tr.features)
     if random_seed:
         tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
     return tr, vl
@@ -53,9 +51,34 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         ('type_text', '[TEXT]'),
         ('type_answ', '[ANSW]')
     ])
-    DSET_IDS = dict(  # For text-classification accuracy
+    DNM2ID = dict(  # For text-classification accuracy
         ag_news=0
     )
+    ID2DNM = {v: k for k, v in DNM2ID.items()}
+
+    class Cache(dict):
+        """
+        Wrapper around caching dict, that loads metadata on corresponding dataset
+        """
+        def __init__(self):
+            super().__init__()
+
+        def __getitem__(self, dnm):
+            """
+            Needed cos huggingface may load cached dataset, internal cache is gone
+            """
+            if dnm not in self:
+                feats = load_dataset(dnm, split='train').features['label']  # Pick a split arbitrarily
+                feat2feat_full = {
+                    'World': 'World News',
+                    'Sports': 'Sports',
+                    'Business': 'Business',
+                    'Sci/Tech': 'Science & Technology'
+                }
+                n_cls = feats.num_classes
+                lb2feat_str: List[str] = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
+                self[dnm] = dict(n_classes=n_cls, label2feature_str=lb2feat_str)
+            return super().__getitem__(dnm)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -71,7 +94,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         # exit(1)
 
         self.templates = config('baselines.gpt2-0shot.templates')
-        self.cache: Dict[str, Dict] = dict()  # Mapping from dataset name to labels
+        self.cache: Dict[str, Dict] = ZsGPT2Tokenizer.Cache()  # Mapping from dataset name to labels
 
         self.ques_token, self.text_token, self.answ_token = (
             ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_answ')
@@ -106,20 +129,22 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(i, dnm, text, label):
+            ic('inside call single')
             assert dnm == 'ag_news'  # Potentially support dynamic dataset
-            if dnm not in self.cache:
-                feats = load_dataset(dnm, split='train').features['label']  # Pick a split arbitrarily
-                feat2feat_full = {
-                    'World': 'World News',
-                    'Sports': 'Sports',
-                    'Business': 'Business',
-                    'Sci/Tech': 'Science & Technology'
-                }
-                n_cls = feats.num_classes
-                lb2feat_str: List[str] = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
-                self.cache[dnm] = dict(n_cls=n_cls, lb2feat_str=lb2feat_str)
-            else:
-                n_cls, lb2feat_str = (self.cache[dnm][k] for k in ('n_cls', 'lb2feat_str'))
+            # if dnm not in self.cache:
+            #     feats = load_dataset(dnm, split='train').features['label']  # Pick a split arbitrarily
+            #     feat2feat_full = {
+            #         'World': 'World News',
+            #         'Sports': 'Sports',
+            #         'Business': 'Business',
+            #         'Sci/Tech': 'Science & Technology'
+            #     }
+            #     n_cls = feats.num_classes
+            #     lb2feat_str: List[str] = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
+            #     self.cache[dnm] = dict(n_classes=n_cls, label2feature_str=lb2feat_str)
+            #     ic('inside call single', self.cache)
+            # else:
+            n_cls, lb2feat_str = (self.cache[dnm][k] for k in ('n_classes', 'label2feature_str'))
 
             idx_lbs = np.arange(n_cls)
             np.random.shuffle(idx_lbs)
@@ -163,18 +188,14 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             out = {k: pad(ints, k) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
-            out['dataset_id'] = ZsGPT2Tokenizer.DSET_IDS[dnm]  # For computing zero-shot classification accuracy
-            ic(out)
+            out['dataset_id'] = ZsGPT2Tokenizer.DNM2ID[dnm]  # For computing zero-shot classification accuracy
             return out
         if is_batched:
             ds = [call_single(i, dnm, txt, lb) for i, (dnm, txt, lb) in enumerate(zip(
                 *[samples[k] for k in ['dataset_name', 'text', 'label']]
             ))]
-            ic({k: [d[k] for d in ds] for k in ds[0]})
             return BatchEncoding({k: [d[k] for d in ds] for k in ds[0]})  # Stack all the ids
         else:
-            out = BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_name', 'text', 'label']]))
-            ic('single', out)
             return BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_name', 'text', 'label']]))
 
 
@@ -323,10 +344,6 @@ def get_all_setup(
         map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'],
         n_sample=n_sample, random_seed=random_seed
     )
-    ic(dset_tr_)
-    # for d in dset_tr_:
-    #     ic(d)
-    #     exit(1)
     trainer_ = CustomTrainer(
         tokenizer=tokenizer_,
         model=model_,
@@ -364,7 +381,6 @@ class TrainPlot:
         n_data, md_sz, lr, bsz, n_ep = (
             meta[k] for k in ('#data', 'model size', 'learning rate', 'batch size', '#epochs')
         )
-        # lr, bsz, n_ep = train_args.learning_rate, train_args.per_device_train_batch_size, train_args.num_train_epochs
         self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, #epochs=${n_ep}$'
         self.title_save = f'{title}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
@@ -447,14 +463,21 @@ class MyLoggingCallback(TrainerCallback):
             self.logger.addHandler(handler)
 
         self.out_dict: Dict = None
+        self.is_compute_loss_on_train = True
+        self.k_cls = 'classification_acc_meta'  # See `CustomTrainer`
+        self.k_cls_eval = f'{self.k_cls}_eval'
+
         self.parent_trainer = parent_trainer
-        args, dset, md = (getattr(parent_trainer, k) for k in ['args', 'train_dataset', 'model'])
-        lr, bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
+        args, dset_tr__, dset_vl_, md = (
+            getattr(parent_trainer, k) for k in ['args', 'train_dataset', 'eval_dataset', 'model']
+        )
+        self.n_eval = len(dset_vl_)
+        lr, self.bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
         self.train_meta = OrderedDict([
-            ('#data', len(dset)), ('model size', md.config.n_positions),
-            ('learning rate', lr), ('batch size', bsz), ('#epochs', n_ep)
+            ('#data', len(dset_tr__)), ('model size', md.config.n_positions),
+            ('learning rate', lr), ('batch size', self.bsz), ('#epochs', n_ep)
         ])
-        self.steps = math.ceil(len(dset) // bsz) * n_ep
+        self.steps = math.ceil(len(dset_tr__) // self.bsz) * n_ep
         self.called_val_init = False
         self.log_hist: List[Dict] = []
 
@@ -496,8 +519,14 @@ class MyLoggingCallback(TrainerCallback):
 
     def on_log(self, args: TrainingArguments, state, control, logs: Dict = None, **kwargs):
         def out_dict2str(d: Dict):
-            keys_ = ['step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc']
-            fmt = [f':>{len(str(self.steps))}', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f']
+            keys_ = [
+                'step', 'epoch', 'train_loss', 'eval_loss', 'train_acc', 'eval_acc',
+                'train_acc_cls', 'eval_acc_cls', 'train_acc_mis', 'eval_acc_mis'
+            ]
+            fmt = [
+                f':>{len(str(self.steps))}', ':6.2f', ':7.4f', ':7.4f', ':6.2f', ':6.2f',
+                ':6.2f', ':6.2f', ':6.2f', ':6.2f'
+            ]
             s_fmts = [f'{{{k}{fmt_}}}' for k, fmt_ in zip(keys_, fmt)]  # Enforce ordering
 
             d = {k: (('loss' in k and round(v, 4)) or ('acc' in k and round(v*100, 4)) or v) for k, v in d.items()}
@@ -510,38 +539,91 @@ class MyLoggingCallback(TrainerCallback):
             if self.interactive:
                 self.plot.update(self.log_hist)
 
+        def cls_stats2dict(d_stats: Dict, n_sample: int, prefix: str) -> Dict:
+            """
+            Convert `classification_acc_meta` dict to stats for logging
+            """
+            n_acc, n_total, n_mis = (d_stats[k] for k in ('n_acc', 'n_total', 'n_missing'))
+            return {
+                f'{prefix}_acc_cls': n_acc/n_total if n_total != 0 else 0,
+                f'{prefix}_acc_mis': n_mis/n_sample  # As a fraction
+            }
+
+        def set_eval_cls_acc():
+            stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
+            # ic(stats_cls_acc)
+            stats_cls_acc: Dict = {k: sum(d[k] for d in stats_cls_acc) for k in stats_cls_acc[0]}
+            # ic(stats_cls_acc, self.out_dict)
+            self.out_dict = {
+                **self.out_dict,
+                **cls_stats2dict(stats_cls_acc, self.n_eval, prefix='eval')
+                # **dict(
+                #     eval_acc_cls=stats_cls_acc['n_acc'] / stats_cls_acc['n_total'],
+                #     eval_cls_mis=stats_cls_acc['n_missing'] / self.n_eval
+                # )
+            }
+
         if state.is_local_process_zero:
             if self.mode == 'train':
                 step = state.global_step
+                # ic(step, logs)
                 if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
                     if step == 0:  # Before model runs, initial call
                         if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
+                            # ic('in validation initial call')
+                            # Got to here, cos the 1st, training compute_loss logging
+                            assert self.is_compute_loss_on_train
                             self.called_val_init = True
-                            tr_acc, tr_loss, n_ep = (logs.get(k, None) for k in ('acc', 'loss', 'epoch'))
+                            tr_acc, tr_loss, n_ep = (logs[k] for k in ('acc', 'loss', 'epoch'))
+                            self.out_dict = {
+                                **dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss,),
+                                **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
+                            }
 
-                            # Other `on_log` calls invoked inside `evaluate` ignored
-                            out: Dict = self.parent_trainer.evaluate()
+                            # Prep for Trainer internal evaluation call
+                            self.is_compute_loss_on_train = False
+                            out: Dict = self.parent_trainer.evaluate()  # Expanded to branch below then comes back
                             n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in ('epoch', 'eval_accuracy', 'eval_loss'))
                             assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
-                            assert n_ep == n_ep_
-                            # Training step in range (1, total steps); Epoch troublesome to calculate TODO
-                            # Prep for Trainer internal evaluation call
-                            self.out_dict = dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss)
+                            assert n_ep == n_ep_ and n_ep == 0
                             # python3.6 compatibility
-                            out = {**self.out_dict, **dict(eval_acc=vl_acc, eval_loss=vl_loss)}
-                            log_update(out)
+                            self.out_dict.update(dict(eval_acc=vl_acc, eval_loss=vl_loss))
+
+                            set_eval_cls_acc()
+                            # del out[self.k_cls_eval]
+                            # ic(self.out_dict)
+                            log_update(self.out_dict)
+                            self.is_compute_loss_on_train = True
+                        elif not self.is_compute_loss_on_train:  # `compute_loss` ran on evaluation set
+                            # => Keep track of the batch-wise classification accuracy
+                            if self.k_cls_eval not in self.out_dict:
+                                self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
+                            else:
+                                self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
+
                     else:  # Need to look for the accuracy calculated for the training batch
-                        acc, loss = logs.get('acc', None), logs.get('loss', None)
-                        assert acc is not None and loss is not None
-                        if self.out_dict is None:  # Heuristic: 1st call to `compute_loss` corresponds to training
-                            # Now is the 1st call, after logging for last batch completes
-                            self.out_dict = dict(step=step, train_acc=acc, train_loss=loss)
+                        # Heuristic: 1st call to `compute_loss` corresponds to training
+                        if self.is_compute_loss_on_train:
+                            self.is_compute_loss_on_train = False
+                            acc, loss = logs.get('acc', None), logs.get('loss', None)
+                            assert acc is not None and loss is not None
+                            if self.out_dict is None:
+                                # Now is the 1st call, after logging for last batch completes
+                                self.out_dict = {
+                                    **dict(step=step, train_acc=acc, train_loss=loss),
+                                    **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
+                                }
+                        else:  # On eval set, keep track like above
+                            if self.k_cls_eval not in self.out_dict:
+                                self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
+                            else:
+                                self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
                 elif 'loss' in logs:  # Internal training log
                     # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
                     # But log anyway, for after gradient update, evaluation loss changes
                     tr_loss, lr, n_ep = (logs.get(k, None) for k in ('loss', 'learning_rate', 'epoch'))
                     assert all(elm is not None for elm in (tr_loss, lr, n_ep))
-                    tr_loss_compute = self.out_dict.get('train_loss', None)
+                    tr_loss_compute: int = self.out_dict.get('train_loss', None)
                     # Without overriding `_maybe_log_save_evaluate`, can only get the training loss with 4 decimal place
                     assert round(tr_loss_compute, 4) == tr_loss
                     # See Trainer.train(); compute_loss executes before step increments
@@ -554,9 +636,15 @@ class MyLoggingCallback(TrainerCallback):
                         assert step == self.out_dict['step']
                         assert n_ep_ == self.out_dict['epoch']
                         # python3.6 compatibility
-                        out = dict(**self.out_dict, **dict(eval_loss=vl_loss, eval_acc=vl_acc))
-                        log_update(out)
+                        self.out_dict.update(dict(eval_loss=vl_loss, eval_acc=vl_acc))
+
+                        # stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
+                        # ic(stats_cls_acc)
+                        set_eval_cls_acc()
+                        # del out[self.k_cls_eval]
+                        log_update(self.out_dict)
                         self.out_dict = None
+                        self.is_compute_loss_on_train = True
                 elif any('runtime' in k for k in logs.keys()):
                     self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
                 else:
@@ -597,25 +685,65 @@ class CustomTrainer(Trainer):
         inputs: Dict[str, torch.Tensor]
         if 'labels' in inputs:
             preds = outputs.logits.detach().argmax(axis=-1)
+            matches: torch.Tensor = (preds == inputs['labels'])
+            d_log = dict(src='compute_loss', acc=round((matches.sum() / matches.numel()).item(), 4))
 
             id_att = self.tokenizer.enc_spec(self.tokenizer.answ_type_token)
-            ic(inputs)
+            id_answ = self.tokenizer.enc_spec(self.tokenizer.answ_token)
+            id_eos = self.tokenizer.enc_spec(self.tokenizer.eos_token)
+            # ic(inputs)
             # ic(outputs)
-            ic(preds)
+            # ic(preds)
             # idxs_att = (inputs['token_type_ids'] == id_att).nonzero()  # matches is sorted tuples
-            # For each unique row/sample with answer tokens present, check if it forms a label, then
-            # sample2idxs: Dict[int, List[int]] = {i_sample: inputs[''] [(row == id_att).nonzero()]}
+            # For each unique row/sample with answer tokens present, check if it forms a label
+            sample2idxs: Dict[int, List[int]] = {
+                # i_sample: list(inputs['input_ids'][i_sample][(row == id_att).nonzero().flatten()])
+                i_sample: (row == id_att).nonzero().flatten().tolist()
+                # i_sample: (row == id_att).nonzero().flatten()
+                for i_sample, row in enumerate(inputs['token_type_ids'])
+            }
+            # sample2ids = {i_sample: inputs['input_ids'][i_sample, v].tolist() for i_sample, v in sample2idxs.items()}
+            # ic(sample2idxs, sample2ids)
+            # id_ques = self.tokanizer.enc_spec(self.tokenizer.ques_token)
+            # assert all(idxs[0] == id_att for idxs in sample2idxs.values())
+            # sample2idxs = {k: v[1:(-1 if v[-1] == id_eos else None)] for k, v in sample2idxs.items()}
+            # ic(sample2idxs)
+            # ic(sample2idxs)
+
+            def get_labels(i, idxs_):
+                if idxs_:
+                    lbs = inputs['input_ids'][i, idxs_].tolist()
+                    assert lbs[0] == id_answ  # Remove answer special prefix token & potentially the ending token
+                    idxs_, lbs = idxs_[1:], lbs[1:]
+                    # ic(idxs, labels)
+                    if lbs:  # Labels are still available
+                        if lbs[-1] == id_eos:
+                            idxs_, lbs = idxs_[:-1], lbs[:-1]
+
+                        dnm = self.tokenizer.ID2DNM[inputs['dataset_id'][i].item()]
+                        # ic(self.tokenizer.cache)
+                        lb2feat_str: List[str] = self.tokenizer.cache[dnm]['label2feature_str']
+
+                        if self.tokenizer.decode(lbs) in lb2feat_str:
+                            return dict(idxs=idxs_, labels=lbs)
+
+            sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
+            sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
+
+            # ic(sample2idxs_n_lbs)
+            d_log['classification_acc_meta'] = dict(
+                n_acc=sum(preds[i_sample, d['idxs']] == d['labels'] for i_sample, d in sample2idxs_n_lbs.items()),
+                n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
+                n_missing=inputs['input_ids'].shape[0]-len(sample2idxs_n_lbs)
+            )
+            # ic(d_log)
+            # exit(1)
+            # If so, check if prediction is also the label
             # for row in inputs['token_type_ids']:
             #     ic((row == id_att).nonzero())
             # idxs = idxs_att[:, 0].unique(sorted=True, return_inverse=True)
             # sample2idxs = defaultdict(list)
-            # for i_sample, idx in idxs_att:
-            #     sample2idxs[i_sample].append(idx)
-            # ic(idxs_att, idxs)
-            # exit(1)
 
-            matches: torch.Tensor = (preds == inputs['labels'])
-            d_log = dict(src='compute_loss', acc=round((matches.sum() / matches.numel()).item(), 4))
         # ========================== End of added ==========================
 
         # Save past state if it exists
@@ -649,7 +777,7 @@ if __name__ == '__main__':
 
     nm, n = 'debug', 8
     # nm, n = 'debug-large', 32
-    model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
+    model, tokenizer, data_collator, tr_args, dset_tr_, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
     trainer.train()
