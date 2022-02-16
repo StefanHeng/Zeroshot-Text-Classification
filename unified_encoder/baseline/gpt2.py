@@ -2,10 +2,12 @@ from collections import defaultdict
 from typing import List, Callable
 
 import pandas as pd
+from torch import nn
 import transformers
 # LMHead for training
 from transformers import BatchEncoding
-from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig, GPT2LMHeadModel, GPT2TokenizerFast
+from transformers import AutoTokenizer, AutoModelWithLMHead, AutoConfig
+from transformers import GPT2LMHeadModel, GPT2TokenizerFast, GPT2Model
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
 from transformers import DataCollatorForLanguageModeling
 from transformers.training_args import OptimizerNames
@@ -33,7 +35,7 @@ def get_dset(
     return tr, vl
 
 
-class ZsTokenizer(GPT2TokenizerFast):
+class ZsGPT2Tokenizer(GPT2TokenizerFast):
     """
     A wrapper around GPT2 tokenizer for 0-shot classification tokenizing
     """
@@ -46,29 +48,26 @@ class ZsTokenizer(GPT2TokenizerFast):
         ('type_answ', '[ANSW]')
     ])
 
-    def __init__(self, **kwargs):
+    def __init__(self, name: str = None, **kwargs):
         super().__init__(**kwargs)
+        # self.name = name  # Model name, for debugging
         # Pad token cannot be `self.eos_token`
         # cos otherwise `DataCollatorForLanguageModeling` would override normal eos tokens
-        self.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=list(ZsTokenizer.SPEC_TOKS.values())))
-        # for i in range(50254, 50266):  # Sanity check
-        #     ic(i, self.decode(i))
-        # ic(self.pad_token)
+        self.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=list(ZsGPT2Tokenizer.SPEC_TOKS.values())))
+        for i in range(50254, 50266):  # Sanity check
+            ic(i, self.decode(i))
+        ic(self.pad_token)
         # exit(1)
 
         self.templates = config('baselines.gpt2-0shot.templates')
         self.cache: Dict[str, Dict] = dict()  # Mapping from dataset name to labels
 
         self.ques_token, self.text_token, self.answ_token = (
-            ZsTokenizer.SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_answ')
+            ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_answ')
         )  # Special tokens
         self.ques_type_token, self.text_type_token, self.answ_type_token = (
-            ZsTokenizer.SPEC_TOKS[k] for k in ('type_ques', 'type_text', 'type_answ')
+            ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('type_ques', 'type_text', 'type_answ')
         )  # Type tokens
-        # ic(self.is_fast)
-        # type_ids = [self.encode(i)[0] for i in (iq, it, ia)]  # Should be encoded into single id
-        # eos = self.eos_token
-        #
 
     def call_paren(self, s: str, **kwargs) -> List[int]:
         return super().__call__(s, **kwargs)['input_ids']
@@ -78,18 +77,21 @@ class ZsTokenizer(GPT2TokenizerFast):
         :param samples: Data sample(s) with keys [`dataset_name`, `label`, `text`]
             Each value an element or a list of elements
         """
-        # ic(samples)
         max_length = kwargs.get('max_length', None)
         is_batched = isinstance(samples['label'], (tuple, list))
         if max_length is None:
             max_length = self.model_max_length
-        n_token = self.max_model_input_sizes['gpt2']  # Indented number of token positions as in vanilla GPT2 model
+        ic(max_length)
+        # if 'debug' in self.name:
+        #     n_token = max_length
+        # n_token = self.max_model_input_sizes['gpt2']  # Indented number of token positions as in vanilla GPT2 model
+        n_token = self.model_max_length
+        ic(n_token)
 
         ln = len(samples['label'])
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(i, dnm, text, label):
-            # dnm, text, label = (sample[k] for k in ('dataset_name', 'text', 'label'))
             assert dnm == 'ag_news'  # Potentially support dynamic dataset
             if dnm not in self.cache:
                 feats = load_dataset(dnm, split='train').features['label']  # Pick a split arbitrarily
@@ -136,111 +138,73 @@ class ZsTokenizer(GPT2TokenizerFast):
             assert all(len(lst_ids) == len(ids) for lst_ids in (ids, tids, msks, pids))  # Sanity check
 
             def pad(ints: List[int], name) -> List[int]:
+                """
+                Pad to max_length, truncate if necessary
+                """
                 if name == 'attention_mask':
                     int_pad = 0  # Ignore in attention
+                elif name == 'position_ids':
+                    int_pad = 0  # Arbitrary, since will be ignored
                 else:
-                    int_pad = self.encode(self.pad_token)  # input_ids set to `pad_token` will be ignored
-                # Pad to max_length, truncate if necessary
+                    # `input_id`s set to `pad_token` will be ignored by `DataCollatorForLanguageModeling`
+                    int_pad = enc_spec(self.pad_token)
                 return ints[:max_length] if len(ints) > max_length else (ints + [int_pad] * (max_length - len(ints)))
-            # return dict(input_ids=ids, attention_mask=msks, token_type_ids=tids, position_ids=pids)
-            out = {k: pad(ints, k) for k, ints in ((
+            return {k: pad(ints, k) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
-            print(text)  # Sanity check
-            print(label)
-            for k, v in out.items():
-                if 'position' in k or 'mask' in k:
-                    toks = [f'{str(i):>15}' for i in v]
-                else:
-                    toks = [f'{self.decode(i):>15}' for i in v]
-                print(f'{k:>20}:', ' '.join(toks))
-            print()
-            exit(1)
-            return out
-
-        # def pad(ints: List[List[int]], int_pad) -> List[List[int]]:
-        #     # Pad to max_length, truncate if necessary
-        #     lst = [l[:max_length] if len(l) > max_length else (l + [int_pad] * (max_length-len(l))) for l in ints]
-        #     return lst
-
+            # print(text)  # Sanity check
+            # print(label)
+            # for k, v in out.items():
+            #     if 'position' in k or 'mask' in k:
+            #         toks = [f'{str(i):>15}' for i in v]
+            #     else:
+            #         toks = [f'{self.decode(i):>15}' for i in v]
+            #     print(f'{k:>20}:', ' '.join(toks))
+            # print()
+            # exit(1)
+            # return out
         if is_batched:
-            # ds = [call_single(i, d) for i, d in enumerate(samples)]
-            # ic([samples[k] for k in ['dataset_name', 'text', 'label']])
             ds = [call_single(i, dnm, txt, lb) for i, (dnm, txt, lb) in enumerate(zip(
                 *[samples[k] for k in ['dataset_name', 'text', 'label']]
             ))]
+            # ic({k: [d[k] for d in ds] for k in ds[0]})
             return BatchEncoding({k: [d[k] for d in ds] for k in ds[0]})  # Stack all the ids
         else:
             return BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_name', 'text', 'label']]))
-        # idx_lbs = np.tile(np.arange(n_cls), (ln, 1))  # Shuffle the labels as in 0-shot pre-training
-        # [np.random.shuffle(row) for row in idx_lbs]
+
+
+class ZsGPT2Model(GPT2Model):
+    """
+    Modifying the `GPT2Model` for 0-shot classification paper
+    """
+    def __init__(self, config):
+        super().__init__(config)
+        # Override internal state
+        # Double the positional embedding matrix, as if stacking the context & output embedding matrices together
+        # See positional id assignment in `ZsGPT2Tokenizer`
+        ic(self.wpe.weight.shape)
+        self.wpe = nn.Embedding(config.max_position_embeddings*2, self.embed_dim)
+        ic(self.wpe.weight.shape)
+
+
+class ZsGPT2LMHeadModel(GPT2LMHeadModel):
+    """
+    So that `ZsGPT2Model` is loaded
+    """
+    def __init__(self, config):
+        super().__init__(config)
+        self.transformer = ZsGPT2Model(config)  # Override internal state
+        ic(self.transformer.wpe.weight.shape)
 
 
 def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
-    # TODO: support pre-training task, variable option sizes?
 
     def _tokenize_func(sample: Dict[str, List]):
         """
         :param sample: A batch of data samples
         """
-        # ic(sample)
-        #
-        # def join_parts(parts: List[Dict[str, List]]):
-        #     # Calling tokenizer with `is_split_into_words` doesn't produce same result
-        #     # No special token is added by tokenizer
-        #     gen = (tokenizer_(elm) for elm in parts)  # Get lists for now
-        #     ids_, msks_ = zip(*((d['input_ids'], d['attention_mask']) for d in gen))
-        #     # return sum(ids_, []), sum(msks_, [])  # Keyword `start` omitted for python3.6 colab compatibility
-        #     return dict(input_ids=sum(ids_, []), attention_mask=sum(msks_, []))
-        #
-        # def single_sample2str(i, cont: str, lb: int):
-        #     strs_lb = ' , '.join(f'" {lb2feat_full[idx]} "' for idx in idx_lbs[i])
-        #     question = templates[idxs_tpl[i]].format(strs_lb)
-        #     # return join_parts([  # Ensures no space around special tokens
-        #     #     sq, question, eos,
-        #     #     st, cont, eos,
-        #     #     sa, lb2feat_full[lb], eos
-        #     # ])
-        #     ques = join_parts([sq, question, eos])
-        #     text = join_parts([st, cont, eos])
-        #     answ = join_parts([sa, lb2feat_full[lb], eos])
-        #     for d, tid in zip((ques, text, answ), type_ids):
-        #         d['token_type_ids'] = [tid] * len(d['input_ids'])
-        #         # ic(tid, d['token_type_ids'])
-        #
-        #     # def concat_dict(ds: List[Dict]):
-        #     #     d_out = defaultdict(list)
-        #     #     for k in ds[0]:
-        #     #         for dic in ds:  # Extend in that order
-        #     #             d_out[k].extend(dic[k])
-        #     #     # return d_out
-        #     d_out = {k: sum((dic[k] for dic in (ques, text, answ)), []) for k in ques}
-        #     idx_type_ans = d_out['input_ids'].index(tokenizer_.encode(sa)[0])
-        #     assert idx_type_ans != -1
-        #
-        #     # Sanity check
-        #     # d_out['input_ids'][0] = 50262
-        #     # ic([i for i in type_ids])
-        #     assert all(all(i != tid for tid in type_ids) for i in d_out['input_ids'] + d_out['attention_mask'])
-        #     ic(d_out)
-        #     exit(1)
-        # ids_n_msks = [
-        #     single_sample2str(i, cont, lb) for i, (cont, lb) in enumerate(zip(sample['text'], sample['label']))
-        # ]
-        # ids, msks = zip(*((i, m) for i, m in ids_n_msks))
-        # # for txt, label, row in zip(sample['text'], sample['label'], ids):
-        # #     print(txt)
-        # #     print(label)
-        # #     print(' '.join(tokenizer_.decode(i) for i in row))
-        # #     print()
-        # # exit(1)
-        #
-        # return BatchEncoding(
-        #     # `pad_token_id` will be ignored per `DataCollatorForLanguageModeling`; 0 for masked positions in attention
-        #     dict(input_ids=pad(ids, int_pad=tokenizer_.pad_token_id), attention_mask=pad(msks, int_pad=0))
-        # )
         sample['dataset_name'] = [dnm] * len(sample['label'])  # Work with single dataset for now
-        return tokenizer_(sample)
+        return tokenizer_(sample, max_length=max_length)
     return _tokenize_func
 
 
@@ -258,13 +222,14 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[GPT2LMHeadModel, GPT2TokenizerFa
             n_token = 4
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         # ic(conf)
-        model_ = GPT2LMHeadModel(config=conf)
+        model_ = ZsGPT2LMHeadModel(config=conf)
+        # model_ = GPT2LMHeadModel(config=conf)
     else:
         model_nm = MODEL_NMS['small']  # TODO: reduce max seq len to 512 as in paper
-        model_ = AutoModelWithLMHead.from_pretrained(model_nm)
+        model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm)
         n_token = conf.n_positions
 
-    tokenizer_ = ZsTokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
+    tokenizer_ = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
     model_.resize_token_embeddings(len(tokenizer_))
 
     return model_, tokenizer_, DataCollatorForLanguageModeling(tokenizer=tokenizer_, mlm=False)
@@ -648,7 +613,7 @@ if __name__ == '__main__':
     transformers.set_seed(seed)
 
     # nm, n = 'debug', 8
-    nm, n = 'debug-large', 128
+    nm, n = 'debug-large', 8
     model, tokenizer, data_collator, train_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
