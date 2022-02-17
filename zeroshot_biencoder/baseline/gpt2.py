@@ -193,6 +193,7 @@ class ZsGPT2Model(GPT2Model):
         # Double the positional embedding matrix, as if stacking the context & output embedding matrices together
         # See positional id assignment in `ZsGPT2Tokenizer`
         self.wpe = nn.Embedding(config.max_position_embeddings*2, self.embed_dim)
+        # ic(self.state_dict())
 
 
 class ZsGPT2LMHeadModel(GPT2LMHeadModel):
@@ -206,6 +207,31 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
     def forward(self, dataset_id=None, **kwargs):
         # Ignore, not need in learning; Just need to pass value for evaluation
         return super().forward(**kwargs)
+
+    @classmethod
+    def from_pretrained(cls, *args, **kwargs):
+        # ic('in here')
+        # ic(cls.mro())
+        # ic(super(ZsGPT2LMHeadModel, cls))
+        # exit(1)
+        md = super().from_pretrained(*args, **kwargs)  # Loads the GPT2LMHeadModel while ignoring `wpe.weight`
+        md_ori = GPT2LMHeadModel.from_pretrained(*args, **kwargs)
+        ic(type(md), type(md_ori))
+        weight_pretrained = md_ori.transformer.wpe.state_dict()['weight']
+        # Check `vars(md_ori.transformer.wpe)`, weight is the only parameter
+        ic(weight_pretrained)
+
+        with torch.no_grad():  # Crude loading the pretrained weights, to each half of the doubled positional embedding
+            n_tok = md.transformer.wpe.weight.shape[0]
+            assert n_tok == 1024 * 2
+            ic(md.transformer.wpe.weight.shape)
+            ic(md.transformer.wpe.weight)
+            md.transformer.wpe.weight[:1024, :] = weight_pretrained
+            md.transformer.wpe.weight[1024:, :] = weight_pretrained
+            ic(md.transformer.wpe.weight)
+        # ic(vars(md_ori.transformer.wpe))
+        del md_ori
+        exit(1)
 
 
 def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
@@ -234,8 +260,13 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokeniz
         # ic(conf)
         model_ = ZsGPT2LMHeadModel(config=conf)
     else:
-        model_nm = MODEL_NMS['small']  # TODO: reduce max seq len to 512 as in paper
-        model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm)
+        k = 'large' if 'medium' in name else 'small'
+        model_nm = MODEL_NMS[k]  # TODO: reduce max seq len to 512 as in paper
+        max_length = 512
+        model_ = ZsGPT2LMHeadModel.from_pretrained(
+            model_nm,
+            ignore_mismatched_sizes=True
+        )
         n_token = conf.n_positions
 
     tokenizer_ = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
@@ -690,7 +721,6 @@ class CustomTrainer(Trainer):
                             return dict(idxs=idxs_, labels=lbs)
 
             sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
-            # ic(sample2idxs_n_lbs)
             sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
             d_log['classification_acc_meta'] = dict(
                 # if prediction is also the label
@@ -729,9 +759,9 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm, n = 'debug', 16
+    nm, n = 'gpt2', 16
     # nm, n = 'debug-large', 128
-    model, tokenizer, data_collator, tr_args, dset_tr_, dset_vl, trainer = get_all_setup(
+    model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
     trainer.train()
