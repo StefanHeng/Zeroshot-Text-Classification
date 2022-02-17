@@ -8,6 +8,10 @@
 ## To Use 
 Python version `3.9.7`.
 
+```bash
+$ pip3 install -r requirements.txt
+```
+
 
 ### Train Baseline 
 e.g. On GPT2 zero shot classification: 
