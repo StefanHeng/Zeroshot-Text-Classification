@@ -14,7 +14,7 @@ from transformers.training_args import OptimizerNames
 from datasets import load_dataset, Dataset
 from datasets import load_metric
 
-from zeroshot_biencoder.util import *
+from zeroshot_encoder.util import *
 
 
 def get_dset(
@@ -86,10 +86,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         self.add_special_tokens(dict(
             pad_token='[PAD]', additional_special_tokens=list(ZsGPT2Tokenizer.SPEC_TOKS.values())
         ))
-        # for i in range(50254, 50266):  # Sanity check
-        #     ic(i, self.decode(i))
-        # ic(self.pad_token)
-        # exit(1)
 
         self.templates = config('baselines.gpt2-0shot.templates')
         self.cache: Dict[str, Dict] = ZsGPT2Tokenizer.Cache()  # Mapping from dataset name to labels
@@ -193,7 +189,6 @@ class ZsGPT2Model(GPT2Model):
         # Double the positional embedding matrix, as if stacking the context & output embedding matrices together
         # See positional id assignment in `ZsGPT2Tokenizer`
         self.wpe = nn.Embedding(config.max_position_embeddings*2, self.embed_dim)
-        # ic(self.state_dict())
 
 
 class ZsGPT2LMHeadModel(GPT2LMHeadModel):
@@ -210,28 +205,18 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
 
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
-        # ic('in here')
-        # ic(cls.mro())
-        # ic(super(ZsGPT2LMHeadModel, cls))
-        # exit(1)
         md = super().from_pretrained(*args, **kwargs)  # Loads the GPT2LMHeadModel while ignoring `wpe.weight`
         md_ori = GPT2LMHeadModel.from_pretrained(*args, **kwargs)
-        ic(type(md), type(md_ori))
         weight_pretrained = md_ori.transformer.wpe.state_dict()['weight']
         # Check `vars(md_ori.transformer.wpe)`, weight is the only parameter
-        ic(weight_pretrained)
+        del md_ori
 
         with torch.no_grad():  # Crude loading the pretrained weights, to each half of the doubled positional embedding
             n_tok = md.transformer.wpe.weight.shape[0]
             assert n_tok == 1024 * 2
-            ic(md.transformer.wpe.weight.shape)
-            ic(md.transformer.wpe.weight)
             md.transformer.wpe.weight[:1024, :] = weight_pretrained
             md.transformer.wpe.weight[1024:, :] = weight_pretrained
-            ic(md.transformer.wpe.weight)
-        # ic(vars(md_ori.transformer.wpe))
-        del md_ori
-        exit(1)
+        return md
 
 
 def tokenize_func(tokenizer_, dnm='ag_news', max_length=None):
@@ -250,26 +235,22 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokeniz
     """
     MODEL_NMS = dict(small='gpt2', large='gpt2-medium')
 
-    conf = AutoConfig.from_pretrained('gpt2')
     if 'debug' in name:  # Try a smaller model for training sanity check
         if 'large' in name:
             n_token = 128
         else:
             n_token = 4
+        conf = AutoConfig.from_pretrained('gpt2')
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
-        # ic(conf)
         model_ = ZsGPT2LMHeadModel(config=conf)
+        model_max_length = n_token
     else:
         k = 'large' if 'medium' in name else 'small'
-        model_nm = MODEL_NMS[k]  # TODO: reduce max seq len to 512 as in paper
-        max_length = 512
-        model_ = ZsGPT2LMHeadModel.from_pretrained(
-            model_nm,
-            ignore_mismatched_sizes=True
-        )
-        n_token = conf.n_positions
+        model_nm = MODEL_NMS[k]
+        model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm, ignore_mismatched_sizes=True)
+        model_max_length = 512  # Reduce max seq len to 512 as in paper
 
-    tokenizer_ = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=n_token)
+    tokenizer_ = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=model_max_length)
     model_.resize_token_embeddings(len(tokenizer_))
 
     return model_, tokenizer_, DataCollatorForLanguageModeling(tokenizer=tokenizer_, mlm=False)
@@ -394,9 +375,9 @@ class TrainPlot:
         self.train_args = train_args
         self.meta = meta
         n_data, md_sz, lr, bsz, n_ep = (
-            meta[k] for k in ('#data', 'model size', 'learning rate', 'batch size', '#epochs')
+            meta[k] for k in ('#data', 'model size', 'learning rate', 'batch shape', '#epochs')
         )
-        self.title_plot = rf'{title}, $\alpha = {lr}$, batch size=${bsz}$, #epochs=${n_ep}$'
+        self.title_plot = rf'{title}, $\alpha = {lr}$, batch shape=${bsz}$, #epochs=${n_ep}$'
         self.title_save = f'{title}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
     def make_plot(self):
@@ -483,14 +464,15 @@ class MyLoggingCallback(TrainerCallback):
         self.k_cls_eval = f'{self.k_cls}_eval'
 
         self.parent_trainer = parent_trainer
-        args, dset_tr__, dset_vl_, md = (
-            getattr(parent_trainer, k) for k in ['args', 'train_dataset', 'eval_dataset', 'model']
+        args, dset_tr__, dset_vl_, md, tokzer = (
+            getattr(parent_trainer, k) for k in ['args', 'train_dataset', 'eval_dataset', 'model', 'tokenizer']
         )
         self.n_eval = len(dset_vl_)
         lr, self.bsz, n_ep = args.learning_rate, args.per_device_train_batch_size, args.num_train_epochs
+        seq_max_len = len(dset_tr__[0]['input_ids'])
         self.train_meta = OrderedDict([
             ('#data', len(dset_tr__)), ('model size', md.config.n_positions),
-            ('learning rate', lr), ('batch size', self.bsz), ('#epochs', n_ep)
+            ('learning rate', lr), ('batch shape', (self.bsz, seq_max_len)), ('#epochs', n_ep)
         ])
         self.steps = math.ceil(len(dset_tr__) // self.bsz) * n_ep
         self.called_val_init = False
@@ -754,13 +736,14 @@ class CustomTrainer(Trainer):
 if __name__ == '__main__':
     from icecream import ic
 
-    from zeroshot_biencoder.util import *
+    from zeroshot_encoder.util import *
 
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm, n = 'gpt2', 16
+    # nm, n = 'debug', 16
     # nm, n = 'debug-large', 128
+    nm, n = 'gpt2', None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
