@@ -244,14 +244,22 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokeniz
         else:
             n_token = 4
         conf = AutoConfig.from_pretrained('gpt2')
-        conf.update(dict(n_ctx=n_token, n_positions=n_token))
+        # If using cpu, must be debugging and hence no `gradient_checkpointing`, see `get_train_setup`
+        conf.update(dict(n_ctx=n_token, n_positions=n_token, use_cache=not torch.cuda.is_available()))
         model_ = ZsGPT2LMHeadModel.from_pretrained(pretrained_model_name, config=conf, ignore_mismatched_sizes=True)
         model_max_length = n_token
     else:
         k = 'large' if 'medium' in name else 'small'
         model_nm = MODEL_NMS[k]
-        model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm, ignore_mismatched_sizes=True)
         model_max_length = 512  # Reduce max seq len to 512 as in paper
+        # conf = AutoConfig.from_pretrained('gpt2')
+        # conf.update(dict(n_ctx=model_max_length, n_positions=model_max_length))
+        # ic(conf)
+        # model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm, config=conf, ignore_mismatched_sizes=True)
+
+        conf = AutoConfig.from_pretrained('gpt2')
+        conf.update(dict(use_cache=False))  # For enabling `gradient_checkpointing`, see `get_train_setup`
+        model_ = ZsGPT2LMHeadModel.from_pretrained(model_nm, config=conf, ignore_mismatched_sizes=True)
 
     tokenizer_ = ZsGPT2Tokenizer.from_pretrained(
         pretrained_model_name, use_fast=True, model_max_length=model_max_length
@@ -267,7 +275,7 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
             learning_rate=1e-4,
             batch_size=4,
             weight_decay=1e-2,
-            num_train_epochs=16,
+            num_train_epochs=4,
             lr_scheduler_type=SchedulerType.CONSTANT,
         ),
         'debug-large': dict(
@@ -320,15 +328,20 @@ def get_train_setup(name='gpt2') -> TrainingArguments:
         disable_tqdm=True,
         # Pass dataset name information down to `compute_loss` for computing text classification accuracy
         remove_unused_columns=False,
-        report_to='none'
+        report_to='none',
+        # gradient_checkpointing=True
+        gradient_checkpointing=torch.cuda.is_available()  # Set to True on CPU gives warning
     )
 
 
 def compute_metrics(eval_pred):
     if not hasattr(compute_metrics, 'metric'):
         compute_metrics.metric = load_metric('accuracy')
-    logits, labels = eval_pred
-    predictions = np.argmax(logits, axis=-1)
+    # logits, labels = eval_pred
+    predictions, labels = eval_pred
+    # ic(logits.shape, labels)
+    # exit(1)
+    # predictions = np.argmax(logits, axis=-1)
     labels, predictions = labels.flatten(), predictions.flatten()  # Original 2D tensor gives error
     return compute_metrics.metric.compute(predictions=predictions, references=labels)
 
@@ -756,6 +769,98 @@ class CustomTrainer(Trainer):
 
         return (loss, outputs) if return_outputs else loss
 
+    def prediction_step(self, model, inputs, prediction_loss_only: bool, ignore_keys=None):
+        """
+        Override `Trainer.prediction_step` for reducing memory footprint
+        """
+        # ========================== Begin of added =========================
+        from transformers.file_utils import is_sagemaker_mp_enabled
+        from transformers.trainer_pt_utils import nested_detach
+        if is_sagemaker_mp_enabled():
+            from transformers.trainer_pt_utils import smp_forward_only, smp_nested_concat
+        # ========================== End of added =========================
+
+        has_labels = all(inputs.get(k) is not None for k in self.label_names)
+        inputs = self._prepare_inputs(inputs)
+        if ignore_keys is None:
+            if hasattr(self.model, "config"):
+                ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
+            else:
+                ignore_keys = []
+
+        # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
+        if has_labels:
+            labels = nested_detach(tuple(inputs.get(name) for name in self.label_names))
+            if len(labels) == 1:
+                labels = labels[0]
+        else:
+            labels = None
+
+        with torch.no_grad():
+            if is_sagemaker_mp_enabled():
+                raw_outputs = smp_forward_only(model, inputs)
+                if has_labels:
+                    if isinstance(raw_outputs, dict):
+                        loss_mb = raw_outputs["loss"]
+                        logits_mb = tuple(v for k, v in raw_outputs.items() if k not in ignore_keys + ["loss"])
+                    else:
+                        loss_mb = raw_outputs[0]
+                        logits_mb = raw_outputs[1:]
+
+                    loss = loss_mb.reduce_mean().detach().cpu()
+                    logits = smp_nested_concat(logits_mb)
+                else:
+                    loss = None
+                    if isinstance(raw_outputs, dict):
+                        logits_mb = tuple(v for k, v in raw_outputs.items() if k not in ignore_keys)
+                    else:
+                        logits_mb = raw_outputs
+                    logits = smp_nested_concat(logits_mb)
+            else:
+                if has_labels:
+                    with self.autocast_smart_context_manager():
+                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                    loss = loss.mean().detach()
+
+                    if isinstance(outputs, dict):
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                    else:
+                        logits = outputs[1:]
+                else:
+                    loss = None
+                    with self.autocast_smart_context_manager():
+                        outputs = model(**inputs)
+                    if isinstance(outputs, dict):
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                    else:
+                        logits = outputs
+                    # TODO: this needs to be fixed and made cleaner later.
+                    if self.args.past_index >= 0:
+                        self._past = outputs[self.args.past_index - 1]
+
+        if prediction_loss_only:
+            return (loss, None, None)
+
+        logits = nested_detach(logits)
+        if len(logits) == 1:
+            logits = logits[0]
+        # ========================== Begin of added =========================
+        # from icecream import ic
+        # ic('in prediction step', loss, logits.shape, labels)
+        # Compute the labels right away,
+        # instead of potentially concatenating the original evaluation matrix of shape (#eval, #model size, #vocab)
+        # logits: torch.Tensor
+        # ic(type(logits), logits.grad)
+        # with torch.no_grad():
+        # logits = np.argmax(logits, axis=-1)
+        # ic(logits.argmax(dim=-1), np.argmax(logits, axis=-1))
+        # exit(1)
+        logits = logits.argmax(dim=-1)
+        ic(logits.device)
+        # ic(logits.shape)
+        # ========================== End of added =========================
+        return (loss, logits, labels)
+
 
 if __name__ == '__main__':
     from icecream import ic
@@ -765,12 +870,15 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm, n = 'debug', 8
+    nm, n = 'debug', 32
     # nm, n = 'debug-large', 128
     # nm, n = 'gpt2', None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
+    import psutil
+    ic(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
+    # exit(1)
     trainer.train()
     trainer.save_model(os.path.join(trainer.args.output_dir))
     trainer.evaluate()
