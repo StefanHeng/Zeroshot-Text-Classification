@@ -4,11 +4,10 @@ from warnings import warn
 import pandas as pd
 from torch import nn
 import transformers
-# LMHead for training
 from transformers import BatchEncoding
 from transformers import AutoConfig
 from transformers import PreTrainedTokenizerBase, GPT2TokenizerFast
-from transformers import GPT2Model, GPT2LMHeadModel
+from transformers import GPT2Model, GPT2LMHeadModel  # LMHead for CLM training
 from transformers import Trainer, TrainingArguments, SchedulerType, TrainerCallback
 from transformers import DataCollatorForLanguageModeling
 from transformers.training_args import OptimizerNames
@@ -247,7 +246,6 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokeniz
         conf = AutoConfig.from_pretrained('gpt2')
         conf.update(dict(n_ctx=n_token, n_positions=n_token))
         model_ = ZsGPT2LMHeadModel.from_pretrained(pretrained_model_name, config=conf, ignore_mismatched_sizes=True)
-        # model_ = ZsGPT2LMHeadModel.from_pretrained('gpt2')
         model_max_length = n_token
     else:
         k = 'large' if 'medium' in name else 'small'
@@ -389,12 +387,13 @@ class TrainPlot:
         self.title_save = f'{title}, n={n_data}, l={md_sz}, a={lr}, bsz={bsz}, n_ep={n_ep}, {now(sep="-")}'
 
     def make_plot(self):
-        fig, self.axes = plt.subplots(2, 1, figsize=(16, 9))
+        fig, self.axes = plt.subplots(3, 1, figsize=(16, 9))
         fig.suptitle(self.title_plot)
-        self.axes[0].set_xlabel('Step')
+        for ax in self.axes:
+            ax.set_xlabel('Step')
         self.axes[0].set_ylabel('Loss')
-        self.axes[1].set_xlabel('Step')
         self.axes[1].set_ylabel('Accuracy (%)')
+        self.axes[2].set_ylabel('Classification Accuracy (%)')
         if self.interactive:
             plt.ion()
 
@@ -405,10 +404,10 @@ class TrainPlot:
         :param stats: List of training step stats
         """
         df = pd.DataFrame(stats)
-        step, tr_acc, tr_loss, vl_acc, vl_loss = (
-            df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss')
+        step, tr_acc, tr_loss, vl_acc, vl_loss, tr_acc_cls, vl_acc_cls = (
+            df[k] for k in ('step', 'train_acc', 'train_loss', 'eval_acc', 'eval_loss', 'train_acc_cls', 'eval_acc_cls')
         )
-        ax1, ax2 = self.axes
+        ax1, ax2, ax3 = self.axes
         # Re-plot, since x and y lim may change
         while ax1.lines:
             ax1.lines[-1].remove()
@@ -416,8 +415,10 @@ class TrainPlot:
             ax2.lines[-1].remove()
         ax1.plot(step, tr_loss, label='Training Loss', c=self.c_tr, **LN_KWARGS)
         ax1.plot(step, vl_loss, label='Validation Loss', c=self.c_vl, **LN_KWARGS)
-        ax2.plot(step, tr_acc, label='Training Accuracy', c=self.c_tr, **LN_KWARGS)
-        ax2.plot(step, vl_acc, label='Validation Accuracy', c=self.c_vl, **LN_KWARGS)
+        ax2.plot(step, tr_acc * 100, label='Training Accuracy', c=self.c_tr, **LN_KWARGS)
+        ax2.plot(step, vl_acc * 100, label='Validation Accuracy', c=self.c_vl, **LN_KWARGS)
+        ax3.plot(step, tr_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
+        ax3.plot(step, vl_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
         ax1.legend()
         ax2.legend()
         plt.draw()  # Needed for `ion`
@@ -467,7 +468,6 @@ class MyLoggingCallback(TrainerCallback):
             setattr(handler, hd_attr_nm, name)
             self.logger.addHandler(handler)
         self.logger_fl = logging.getLogger('trainer-file-write')  # Write out to file
-        # ic(self.logger_fl.level)
         self.logger_fl.setLevel(logging.DEBUG)
         self.fl_handler = None
 
@@ -532,8 +532,7 @@ class MyLoggingCallback(TrainerCallback):
             t = fmt_dt(self.t_end - self.t_strt)
             self.logger.info(f'Training completed in {logi(t)} ')
             self.logger_fl.info(f'Training completed in {t} ')
-            self.logger_fl.removeHandler(self.fl_handler)
-            # self.logger_fl.handlers = []  # Remove prior `FileHandler`, prep for next potential run
+            self.logger_fl.removeHandler(self.fl_handler)  # Remove prior `FileHandler`, prep for next potential run
             self.fl_handler = None
 
             if self.interactive:
@@ -565,7 +564,6 @@ class MyLoggingCallback(TrainerCallback):
             out_console, out_write = out_dict2str(d_out, return_wo_color=True)
             self.logger.info(out_console)
             self.logger_fl.info(out_write)
-            # ic('in log update', out_write)
             self.log_hist.append(d_out)
             if self.interactive:
                 self.plot.update(self.log_hist)
@@ -575,7 +573,6 @@ class MyLoggingCallback(TrainerCallback):
             Convert `classification_acc_meta` dict to stats for logging
             """
             n_acc, n_total, n_mis = (d_stats[k] for k in ('n_acc', 'n_total', 'n_missing'))
-            # ic(n_mis, n_sample, n_mis/n_sample, prefix)
             return {
                 f'{prefix}_acc_cls': n_acc/n_total if n_total != 0 else 0,
                 f'{prefix}_acc_mis': n_mis/n_sample  # As a fraction
@@ -583,7 +580,6 @@ class MyLoggingCallback(TrainerCallback):
 
         def set_eval_cls_acc():
             stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
-            # ic(stats_cls_acc)
             stats_cls_acc: Dict = {k: sum(d[k] for d in stats_cls_acc) for k in stats_cls_acc[0]}
             self.out_dict = {
                 **self.out_dict,
@@ -733,7 +729,7 @@ class CustomTrainer(Trainer):
             sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
             sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
             d_log['classification_acc_meta'] = dict(
-                # if prediction is also the label
+                # prediction ids match label ids
                 n_acc=sum(preds[i_sample, d['idxs']] == d['labels'] for i_sample, d in sample2idxs_n_lbs.items()),
                 n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
                 n_missing=inputs['input_ids'].shape[0]-len(sample2idxs_n_lbs)
@@ -775,8 +771,6 @@ if __name__ == '__main__':
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, n_sample=n, random_seed=seed
     )
-    # ic(model.config)
-    # exit(1)
     trainer.train()
     trainer.save_model(os.path.join(trainer.args.output_dir))
     trainer.evaluate()
