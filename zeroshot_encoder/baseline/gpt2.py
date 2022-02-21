@@ -28,8 +28,8 @@ def get_dset(
         tr = tr.select(range(n_sample))
         vl = vl.select(range(n_sample))
     if map_func is not None:
-        tr = tr.map(map_func, batched=True, remove_columns=remove_columns)
-        vl = vl.map(map_func, batched=True, remove_columns=remove_columns)
+        tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=4)
+        vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=4)
 
         if 'dataset_name' in tr.column_names:
             tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
@@ -201,7 +201,7 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
         self.transformer = ZsGPT2Model(config)  # Override internal state
 
     def forward(self, dataset_id=None, **kwargs):
-        # Ignore, not need in learning; Just need to pass value for evaluation
+        # Function override to ignore `dataset_id`, not need in learning; Just need to pass value for evaluation
         return super().forward(**kwargs)
 
     @classmethod
@@ -356,7 +356,10 @@ def get_all_setup(
     Dataset, Dataset, Trainer
 ]:
     if name == 'debug-gpt-ori':  # Sanity check: As if keep training GPT-2, with padding for simplicity
-        model_, tokenizer_ = GPT2LMHeadModel.from_pretrained('gpt2'), GPT2TokenizerFast.from_pretrained('gpt2')
+        conf = AutoConfig.from_pretrained('gpt2')
+        conf.update(dict(use_cache=False))
+        model_ = GPT2LMHeadModel.from_pretrained('gpt2', config=conf)
+        tokenizer_ = GPT2TokenizerFast.from_pretrained('gpt2')
         # tokenizer_.pad_token = tokenizer_.eos_token
         data_collator_ = None
         train_args_ = get_train_setup(name, do_eval=do_eval)
@@ -365,7 +368,8 @@ def get_all_setup(
             examples = tokenizer_(examples['text'])
             # Taken from
             # https://github.com/huggingface/notebooks/blob/master/examples/language_modeling_from_scratch.ipynb
-            block_size = tokenizer_.model_max_length
+            # block_size = tokenizer_.model_max_length
+            block_size = 512  # To fit in memory
             concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
             total_length = len(concatenated_examples[list(examples.keys())[0]])
             total_length = (total_length // block_size) * block_size
@@ -954,7 +958,7 @@ if __name__ == '__main__':
     transformers.set_seed(seed)
 
     # nm, n = 'debug', 8
-    nm, n = 'debug-gpt-ori', 64
+    nm, n = 'debug-gpt-ori', None
     # nm, n = 'debug-large', 128
     # nm, n = 'gpt2', None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(

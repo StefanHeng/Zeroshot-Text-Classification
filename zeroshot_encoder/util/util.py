@@ -9,14 +9,16 @@ from functools import reduce
 from collections import OrderedDict
 
 import numpy as np
+import pandas as pd
 import torch
+import datasets
 from matplotlib import rcParams
 import matplotlib.pyplot as plt
 import seaborn as sns
 import colorama
 import sty
 
-from .data_path import *
+from zeroshot_encoder.util.data_path import *
 
 
 rcParams['figure.constrained_layout.use'] = True
@@ -294,20 +296,32 @@ def plot_points(arr, **kwargs):
         marker='.', lw=0.5, ms=1,
         c='orange',
     )
-    kwargs = {**kwargs_, **kwargs}  # Support versions below 3.9
-    # vers = get_python_version()
-    # assert vers['major'] == 3
-    # if vers['minor'] < 9:
-    #     kwargs = {**kwargs_, **kwargs}
-    # else:
-    #     kwargs = kwargs_ | kwargs
+    kwargs = {**kwargs_, **kwargs}  # python3.6 compatibility
     plt.plot(arr[:, 0], arr[:, 1], **kwargs)
+
+
+def load_benchmark_dataset():
+    ext = config('benchmark.dataset_ext')
+    for dnm, path in config('benchmark.datasets').items():
+        path = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, f'{path}.{ext}')
+        with open(path) as f:
+            dsets: Dict = json.load(f)
+        ic(dnm)
+        for split, dset in dsets.items():
+            ic(split)
+            dset = [dict(text=txt, label=lb) for (txt, lb) in dset]  # Heuristic on how the `json` are stored
+            dset = datasets.Dataset.from_pandas(pd.DataFrame(dset))
+            features = datasets.Features(  # Sort the string labels, enforce deterministic order
+                text=datasets.Value(dtype='string'), label=datasets.ClassLabel(names=sorted(dset.unique('label')))
+            )
+            ic(features)
 
 
 if __name__ == '__main__':
     from icecream import ic
 
-    ic(config('fine-tune'))
+    # ic(config('fine-tune'))
 
-    ic(fmt_num(124439808))
+    # ic(fmt_num(124439808))
 
+    load_benchmark_dataset()

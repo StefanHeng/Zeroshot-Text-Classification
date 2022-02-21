@@ -60,6 +60,20 @@ config = {
             ]
         )
     },
+    'benchmark': dict(
+        datasets=dict(  # dataset name => relative path, all in json
+            clinc='intent/clinc',
+            sgd='intent/sgd',
+            slurp='intent/slurp',
+            sentiment='sentiment/emotion',
+            go_emotion='sentiment/go_emotion',
+            sentiment_tweets_2020='sentiment/sentiment_tweets_2020',
+            ag_news='topic/ag_news',
+            dbpedia='topic/dbpedia',
+            yahoo='topic/yahoo'
+        ),
+        dataset_ext='json',
+    ),
     'random-seed': 77
 }
 

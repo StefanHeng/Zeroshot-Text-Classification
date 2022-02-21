@@ -2,6 +2,7 @@
 .vscode/
 .DS_Store
 datasets/
+dataset/
 models/
 test_lang*
 examples/
