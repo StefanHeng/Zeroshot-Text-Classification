@@ -360,7 +360,6 @@ def get_all_setup(
         conf.update(dict(use_cache=False))
         model_ = GPT2LMHeadModel.from_pretrained('gpt2', config=conf)
         tokenizer_ = GPT2TokenizerFast.from_pretrained('gpt2')
-        # tokenizer_.pad_token = tokenizer_.eos_token
         data_collator_ = None
         train_args_ = get_train_setup(name, do_eval=do_eval)
 
@@ -379,7 +378,6 @@ def get_all_setup(
             }
             result["labels"] = result["input_ids"].copy()
             return result
-
         dset_tr_, dset_vl_ = get_dset(
             map_func=group_texts, remove_columns=['label', 'text'],
             n_sample=n_sample, random_seed=random_seed
