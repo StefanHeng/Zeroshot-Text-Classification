@@ -16,7 +16,6 @@ from datasets import load_metric
 
 from zeroshot_encoder.util import *
 
-# Trainer.evaluate()
 
 def get_dset(
         dnm='ag_news',
@@ -439,6 +438,7 @@ class TrainPlot:
             ax3.plot(step, vl_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
         ax1.legend()
         ax2.legend()
+        ax3.legend()
         plt.draw()  # Needed for `ion`
 
     def plot_single(self, stats):
@@ -484,7 +484,7 @@ class MyLoggingCallback(TrainerCallback):
         if not had_handler:
             handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
             handler.setLevel(logging.DEBUG)
-            handler.setFormatter(MyFormatter())
+            handler.setFormatter(MyFormatter(with_color=True))
             # For ipython compatibility, potentially update it instead of adding new handler
             setattr(handler, hd_attr_nm, name)
             self.logger.addHandler(handler)
@@ -531,13 +531,18 @@ class MyLoggingCallback(TrainerCallback):
         self.mode = mode
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
+        self.logger_fl.removeHandler(self.fl_handler)  # Remove prior `FileHandler`, prep for next potential run
+        self.fl_handler = None
+
         self.log_fnm = self.log_fnm_tpl.format(now(sep="-"))
         # Set file write logging
         self.fl_handler = logging.FileHandler(os.path.join(self.parent_trainer.args.output_dir, f'{self.log_fnm}.log'))
+        self.fl_handler.setLevel(logging.DEBUG)
+        self.fl_handler.setFormatter(MyFormatter(with_color=False))
         self.logger_fl.addHandler(self.fl_handler)
 
         self.logger.info(f'Training started with {log_dict(self.train_meta)}')
-        self.logger_fl.info(f'Training started with {self.train_meta}')
+        self.logger_fl.info(f'Training started with {log_dict(self.train_meta, with_color=False)}')
         self.t_strt = datetime.datetime.now()
 
         self.mode = 'train'
@@ -554,8 +559,6 @@ class MyLoggingCallback(TrainerCallback):
             t = fmt_dt(self.t_end - self.t_strt)
             self.logger.info(f'Training completed in {logi(t)} ')
             self.logger_fl.info(f'Training completed in {t} ')
-            self.logger_fl.removeHandler(self.fl_handler)  # Remove prior `FileHandler`, prep for next potential run
-            self.fl_handler = None
 
             if self.interactive:
                 self.plot.finish()
@@ -607,6 +610,10 @@ class MyLoggingCallback(TrainerCallback):
                 **self.out_dict,
                 **cls_stats2dict(stats_cls_acc, self.n_eval, prefix='eval')
             }
+
+        def log_default(d_stats: Dict):
+            self.logger.info(log_dict(d_stats) if isinstance(d_stats, dict) else d_stats)
+            self.logger_fl.info(log_dict(d_stats, with_color=False) if isinstance(d_stats, dict) else d_stats)
 
         if state.is_local_process_zero:
             if self.mode == 'train':
@@ -688,7 +695,7 @@ class MyLoggingCallback(TrainerCallback):
                             self.out_dict = None
                             self.is_compute_loss_on_train = True
                     elif any('runtime' in k for k in logs.keys()):
-                        self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
+                        log_default(logs)
                     else:
                         print('unhandled case', logs)
                         exit(1)
@@ -709,7 +716,7 @@ class MyLoggingCallback(TrainerCallback):
                         exit(1)
             else:
                 if 'src' not in logs:  # Skip custom compute_loss logging
-                    self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
+                    log_default(logs)
 
 
 class ColoredPrinterCallback(TrainerCallback):
@@ -921,7 +928,7 @@ if __name__ == '__main__':
     # nm, n = 'debug-large', 128
     # nm, n = 'gpt2', None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
-        nm, do_eval=False, custom_logging=False, n_sample=n, random_seed=seed
+        nm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
     # import psutil
     # ic(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
