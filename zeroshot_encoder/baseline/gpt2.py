@@ -31,8 +31,9 @@ def get_dset(
         tr = tr.map(map_func, batched=True, remove_columns=remove_columns)
         vl = vl.map(map_func, batched=True, remove_columns=remove_columns)
 
-        tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
-        vl = vl.remove_columns('dataset_name')
+        if 'dataset_name' in tr.column_names:
+            tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
+            vl = vl.remove_columns('dataset_name')
     if random_seed:
         tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
     return tr, vl
@@ -266,6 +267,9 @@ def get_model_n_tokenizer(name='gpt2') -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokeniz
 
 
 def get_train_setup(name='gpt2', do_eval=True) -> TrainingArguments:
+    name_ = name
+    if name_ == 'debug-gpt-ori':
+        name_ = 'gpt2'
     D_TRAIN_ARGS = {
         'debug': dict(
             learning_rate=1e-4,
@@ -296,12 +300,12 @@ def get_train_setup(name='gpt2', do_eval=True) -> TrainingArguments:
             lr_scheduler_type=SchedulerType.COSINE,
         )
     }
-    lr, bsz, decay, n_ep, sch = (D_TRAIN_ARGS[name][k] for k in [
+    lr, bsz, decay, n_ep, sch = (D_TRAIN_ARGS[name_][k] for k in [
         'learning_rate', 'batch_size', 'weight_decay', 'num_train_epochs', 'lr_scheduler_type'
     ])
 
     return TrainingArguments(
-        output_dir=os.path.join(PATH_BASE, DIR_PROJ, DIR_MDL, 'gpt2', now(sep='-')),
+        output_dir=os.path.join(PATH_BASE, DIR_PROJ, DIR_MDL, 'gpt2', name, now(sep='-')),
         do_train=True,
         do_eval=do_eval,
         evaluation_strategy='steps' if do_eval else 'no',
@@ -351,21 +355,45 @@ def get_all_setup(
     GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling, TrainingArguments,
     Dataset, Dataset, Trainer
 ]:
-    model_, tokenizer_, data_collator_ = get_model_n_tokenizer(name)
-    train_args_ = get_train_setup(name, do_eval=do_eval)
-    dset_tr_, dset_vl_ = get_dset(
-        map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'],
-        n_sample=n_sample, random_seed=random_seed
+    if name == 'debug-gpt-ori':  # Sanity check: As if keep training GPT-2, with padding for simplicity
+        model_, tokenizer_ = GPT2LMHeadModel.from_pretrained('gpt2'), GPT2TokenizerFast.from_pretrained('gpt2')
+        # tokenizer_.pad_token = tokenizer_.eos_token
+        data_collator_ = None
+        train_args_ = get_train_setup(name, do_eval=do_eval)
+
+        def group_texts(examples):
+            examples = tokenizer_(examples['text'])
+            # Taken from
+            # https://github.com/huggingface/notebooks/blob/master/examples/language_modeling_from_scratch.ipynb
+            block_size = tokenizer_.model_max_length
+            concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
+            total_length = len(concatenated_examples[list(examples.keys())[0]])
+            total_length = (total_length // block_size) * block_size
+            result = {
+                k: [t[i: i + block_size] for i in range(0, total_length, block_size)]
+                for k, t in concatenated_examples.items()
+            }
+            result["labels"] = result["input_ids"].copy()
+            return result
+
+        dset_tr_, dset_vl_ = get_dset(
+            map_func=group_texts, remove_columns=['label', 'text'],
+            n_sample=n_sample, random_seed=random_seed
+        )
+    else:
+        model_, tokenizer_, data_collator_ = get_model_n_tokenizer(name)
+        train_args_ = get_train_setup(name, do_eval=do_eval)
+        dset_tr_, dset_vl_ = get_dset(
+            map_func=tokenize_func(tokenizer_), remove_columns=['label', 'text'],
+            n_sample=n_sample, random_seed=random_seed
+        )
+    trainer_args = dict(
+        model=model_, args=train_args_, data_collator=data_collator_,
+        train_dataset=dset_tr_, eval_dataset=dset_vl_, compute_metrics=compute_metrics
     )
     trainer_ = CustomTrainer(
-        tokenizer=tokenizer_,
-        custom_logging=custom_logging,
-        model=model_,
-        args=train_args_,
-        data_collator=data_collator_,
-        train_dataset=dset_tr_,
-        eval_dataset=dset_vl_,
-        compute_metrics=compute_metrics
+        tokenizer=tokenizer_, custom_logging=custom_logging, compute_cls_acc=name != 'debug-gpt-ori',
+        **trainer_args
     )
     return model_, tokenizer_, data_collator_, train_args_, dset_tr_, dset_vl_, trainer_
 
@@ -433,7 +461,8 @@ class TrainPlot:
         ax2.plot(step, tr_acc * 100, label='Training Accuracy', c=self.c_tr, **LN_KWARGS)
         if vl_acc is not None:
             ax2.plot(step, vl_acc * 100, label='Validation Accuracy', c=self.c_vl, **LN_KWARGS)
-        ax3.plot(step, tr_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
+        if tr_acc_cls is not None:
+            ax3.plot(step, tr_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
         if vl_acc_cls is not None:
             ax3.plot(step, vl_acc_cls * 100, label='Training Classification Accuracy', c=self.c_tr, **LN_KWARGS)
         ax1.legend()
@@ -492,7 +521,7 @@ class MyLoggingCallback(TrainerCallback):
         self.logger_fl.setLevel(logging.DEBUG)
         self.fl_handler = None
 
-        self.out_dict: Dict = None
+        self.out_dict: Dict[str, Union[int, float, List]] = None
         self.is_compute_loss_on_train = True
         self.k_cls = 'classification_acc_meta'  # See `CustomTrainer`
         self.k_cls_eval = f'{self.k_cls}_eval'
@@ -700,14 +729,12 @@ class MyLoggingCallback(TrainerCallback):
                         print('unhandled case', logs)
                         exit(1)
                 else:  # Only training
-                    # Assumes gradient update in single batch, i.e. gradient_accumualtion not supported
+                    # Assumes gradient update in single batch, i.e. gradient_accumulation not supported
                     if 'src' in logs and logs['src'] == 'compute_loss':
                         tr_acc, tr_loss, n_ep = (logs[k] for k in ('acc', 'loss', 'epoch'))
-                        self.out_dict = {
-                            **dict(step=step, epoch=n_ep, train_acc=tr_acc, train_loss=tr_loss, ),
-                            **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
-                        }
-                        # ic(logs)
+                        self.out_dict = dict(step=step, epoch=n_ep, train_acc=tr_acc, train_loss=tr_loss, )
+                        if self.parent_trainer.compute_cls_acc:
+                            self.out_dict.update(cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train'))
                         log_update(self.out_dict)
                     elif any('runtime' in k for k in logs.keys()):
                         self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
@@ -741,10 +768,11 @@ class ColoredPrinterCallback(TrainerCallback):
 
 
 class CustomTrainer(Trainer):
-    def __init__(self, tokenizer: ZsGPT2Tokenizer = None, custom_logging=True, **kwargs):
+    def __init__(self, tokenizer: ZsGPT2Tokenizer = None, custom_logging=True, compute_cls_acc=True, **kwargs):
         super().__init__(**kwargs)
         assert 'args' in kwargs
         self.custom_logging = custom_logging
+        self.compute_cls_acc = compute_cls_acc
 
         self.tokenizer = tokenizer  # TODO: generalize to more tokenizers?
         self.post_init()
@@ -781,36 +809,37 @@ class CustomTrainer(Trainer):
             matches: torch.Tensor = (preds == inputs['labels'])
             d_log = dict(src='compute_loss', acc=round((matches.sum() / matches.numel()).item(), 4))
 
-            id_att = self.tokenizer.enc_spec(self.tokenizer.answ_type_token)
-            id_answ = self.tokenizer.enc_spec(self.tokenizer.answ_token)
-            id_eos = self.tokenizer.enc_spec(self.tokenizer.eos_token)
-            sample2idxs: Dict[int, List[int]] = {
-                i_sample: (row == id_att).nonzero().flatten().tolist()
-                for i_sample, row in enumerate(inputs['token_type_ids'])
-            }
+            if self.compute_cls_acc:
+                id_att = self.tokenizer.enc_spec(self.tokenizer.answ_type_token)
+                id_answ = self.tokenizer.enc_spec(self.tokenizer.answ_token)
+                id_eos = self.tokenizer.enc_spec(self.tokenizer.eos_token)
+                sample2idxs: Dict[int, List[int]] = {
+                    i_sample: (row == id_att).nonzero().flatten().tolist()
+                    for i_sample, row in enumerate(inputs['token_type_ids'])
+                }
 
-            # For each unique row/sample with answer tokens present, check if it forms a classification label string
-            def get_labels(i, idxs_):
-                if idxs_:
-                    lbs = inputs['input_ids'][i, idxs_].tolist()
-                    assert lbs[0] == id_answ  # Remove answer special prefix token & potentially the ending token
-                    idxs_, lbs = idxs_[1:], lbs[1:]
-                    if lbs:  # Labels are still available
-                        if lbs[-1] == id_eos:
-                            idxs_, lbs = idxs_[:-1], lbs[:-1]
-                        dnm = self.tokenizer.ID2DNM[inputs['dataset_id'][i].item()]
-                        lb2feat_str: List[str] = self.tokenizer.cache[dnm]['label2feature_str']
-                        if self.tokenizer.decode(lbs) in lb2feat_str:
-                            return dict(idxs=idxs_, labels=lbs)
+                # For each unique row/sample with answer tokens present, check if it forms a classification label string
+                def get_labels(i, idxs_):
+                    if idxs_:
+                        lbs = inputs['input_ids'][i, idxs_].tolist()
+                        assert lbs[0] == id_answ  # Remove answer special prefix token & potentially the ending token
+                        idxs_, lbs = idxs_[1:], lbs[1:]
+                        if lbs:  # Labels are still available
+                            if lbs[-1] == id_eos:
+                                idxs_, lbs = idxs_[:-1], lbs[:-1]
+                            dnm = self.tokenizer.ID2DNM[inputs['dataset_id'][i].item()]
+                            lb2feat_str: List[str] = self.tokenizer.cache[dnm]['label2feature_str']
+                            if self.tokenizer.decode(lbs) in lb2feat_str:
+                                return dict(idxs=idxs_, labels=lbs)
 
-            sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
-            sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
-            d_log['classification_acc_meta'] = dict(
-                # prediction ids match label ids
-                n_acc=sum(preds[i_sample, d['idxs']] == d['labels'] for i_sample, d in sample2idxs_n_lbs.items()),
-                n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
-                n_missing=inputs['input_ids'].shape[0]-len(sample2idxs_n_lbs)
-            )
+                sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
+                sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
+                d_log['classification_acc_meta'] = dict(
+                    # prediction ids match label ids
+                    n_acc=sum(preds[i_sample, d['idxs']] == d['labels'] for i_sample, d in sample2idxs_n_lbs.items()),
+                    n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
+                    n_missing=inputs['input_ids'].shape[0]-len(sample2idxs_n_lbs)
+                )
         # ========================== End of added ==========================
 
         # Save past state if it exists
@@ -924,7 +953,8 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    nm, n = 'debug', 8
+    # nm, n = 'debug', 8
+    nm, n = 'debug-gpt-ori', 64
     # nm, n = 'debug-large', 128
     # nm, n = 'gpt2', None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(

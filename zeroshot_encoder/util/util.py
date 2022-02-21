@@ -231,17 +231,6 @@ class MyFormatter(logging.Formatter):
         logging.CRITICAL: ('CRIT', CRIT)
     }
 
-    def fmt_meta(self, meta_abv, meta_style=None):
-        if self.with_color:
-            return f'{MyFormatter.purple}[{MyFormatter.KW_NAME}]' \
-               f'{MyFormatter.blue}::{MyFormatter.purple}{MyFormatter.KW_FUNCNM}' \
-               f'{MyFormatter.blue}::{MyFormatter.purple}{MyFormatter.KW_FNM}' \
-               f'{MyFormatter.blue}:{MyFormatter.purple}{MyFormatter.KW_LINENO}' \
-               f'{MyFormatter.blue}, {meta_style}{meta_abv}{MyFormatter.RESET}'
-        else:
-            return f'[{MyFormatter.KW_NAME}] {MyFormatter.KW_FUNCNM}::{MyFormatter.KW_FNM}' \
-                   f':{MyFormatter.KW_LINENO}, {meta_abv}'
-
     def __init__(self, with_color=True, color_time=green):
         super().__init__()
         self.with_color = with_color
@@ -259,6 +248,17 @@ class MyFormatter(logging.Formatter):
         self.formatter = {
             lv: logging.Formatter(fmt, datefmt='%Y-%m-%d %H:%M:%S') for lv, fmt in self.formats.items()
         }
+
+    def fmt_meta(self, meta_abv, meta_style=None):
+        if self.with_color:
+            return f'{MyFormatter.purple}[{MyFormatter.KW_NAME}]' \
+               f'{MyFormatter.blue}::{MyFormatter.purple}{MyFormatter.KW_FUNCNM}' \
+               f'{MyFormatter.blue}::{MyFormatter.purple}{MyFormatter.KW_FNM}' \
+               f'{MyFormatter.blue}:{MyFormatter.purple}{MyFormatter.KW_LINENO}' \
+               f'{MyFormatter.blue}, {meta_style}{meta_abv}{MyFormatter.RESET}'
+        else:
+            return f'[{MyFormatter.KW_NAME}] {MyFormatter.KW_FUNCNM}::{MyFormatter.KW_FNM}' \
+                   f':{MyFormatter.KW_LINENO}, {meta_abv}'
 
     def format(self, entry):
         return self.formatter[entry.levelno].format(entry)
