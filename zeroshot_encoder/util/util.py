@@ -3,7 +3,7 @@ import sys
 import json
 import math
 import logging
-from typing import Union, Tuple, Dict
+from typing import Union, Tuple, List, Dict
 import datetime
 from functools import reduce
 from collections import OrderedDict
@@ -302,19 +302,53 @@ def plot_points(arr, **kwargs):
 
 def load_benchmark_dataset():
     ext = config('benchmark.dataset_ext')
-    for dnm, path in config('benchmark.datasets').items():
+    # for dnm, path in config('benchmark.datasets').items():
+
+    def path2dsets(path):
         path = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, f'{path}.{ext}')
         with open(path) as f:
             dsets: Dict = json.load(f)
-        ic(dnm)
-        for split, dset in dsets.items():
-            ic(split)
+        # ic(dnm)
+        # for split, dset in dsets.items():
+
+        def json2dset(dset: List) -> datasets.Dataset:
             dset = [dict(text=txt, label=lb) for (txt, lb) in dset]  # Heuristic on how the `json` are stored
-            dset = datasets.Dataset.from_pandas(pd.DataFrame(dset))
-            features = datasets.Features(  # Sort the string labels, enforce deterministic order
-                text=datasets.Value(dtype='string'), label=datasets.ClassLabel(names=sorted(dset.unique('label')))
-            )
-            ic(features)
+            # dset = datasets.Dataset.from_pandas(pd.DataFrame(dset))
+            # # ic(split, dset)
+            # lbs = datasets.ClassLabel(names=sorted(dset.unique('label')))
+            # # Sort the string labels, enforce deterministic order
+            # features = datasets.Features(text=datasets.Value(dtype='string'), label=lbs)
+            # dset = datasets.Dataset.from_pandas(pd.DataFrame(dset))
+
+            df = pd.DataFrame(dset)
+            # ic(sorted(df.label.unique()))
+            lbs = datasets.ClassLabel(names=sorted(df.label.unique()))
+            # ic(lbs.names, lbs)
+            features = datasets.Features(text=datasets.Value(dtype='string'), label=lbs)
+            df.label.replace(to_replace=lbs.names, value=lbs.num_classes, inplace=True)
+            return datasets.Dataset.from_pandas(df, features=features)
+            # ic(dset, dset[:5], dset.features)
+            # exit(1)
+            # # ic(features)
+            # # dset = dset.cast(features, num_proc=4)
+            # # dset = dset.cast(features)  # Map to integer labels so that fit to training pipeline
+            #
+            # def lb_str2int(batch):
+            #     batch['label'] = lbs.str2int(batch['label'])
+            #     # ic(batch['label'])
+            #     # ic(batch)
+            #     # exit(1)
+            #     return batch
+            # dset = dset.map(lb_str2int, batched=True)
+            # dset.features = features  # TODO: is there an API for this?
+            # ic(dset.features)
+            # ic(dset[:5])
+            # return dset
+
+        return datasets.DatasetDict({split: json2dset(dset) for split, dset in dsets.items()})
+        # ic(dsets)
+    d_dsets = {dnm: path2dsets(path) for dnm, path in config('benchmark.datasets').items()}
+    ic(d_dsets)
 
 
 if __name__ == '__main__':
