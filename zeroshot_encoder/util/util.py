@@ -3,8 +3,9 @@ import sys
 import json
 import math
 import logging
-from typing import Union, Tuple, List, Dict
 import datetime
+import itertools
+from typing import Union, Tuple, List, Dict, Iterable, TypeVar
 from functools import reduce
 from collections import OrderedDict
 
@@ -32,6 +33,17 @@ def get_python_version():
         major=vi[0],
         minor=vi[1]
     )
+
+
+T = TypeVar('T')
+K = TypeVar('K')
+
+
+def join_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
+    out = itertools.chain()
+    for it in its:
+        out = itertools.chain(out, it)
+    return out
 
 
 def get(dic, ks):
@@ -72,6 +84,9 @@ def config(attr):
     if not hasattr(config, 'config'):
         with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'r') as f:
             config.config = json.load(f)
+    config.config['benchmark']['dataset_id2name'] = {  # Convert str keys to int
+        int(k): v for k, v in config.config['benchmark']['dataset_id2name'].items()
+    }
     return get(config.config, attr)
 
 
@@ -300,7 +315,7 @@ def plot_points(arr, **kwargs):
     plt.plot(arr[:, 0], arr[:, 1], **kwargs)
 
 
-def process_benchmark_dataset(join_train=False):
+def process_benchmark_dataset(join=False):
     ext = config('benchmark.dataset_ext')
     path_dset = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
 
@@ -314,7 +329,7 @@ def process_benchmark_dataset(join_train=False):
         def json2dset(split: str, dset: List) -> Union[datasets.Dataset, pd.DataFrame]:
             dset = [dict(text=txt, label=lb) for (txt, lb) in dset]  # Heuristic on how the `json` are stored
             df_ = pd.DataFrame(dset)
-            if join_train:  # Leave processing labels til later
+            if join:  # Leave processing labels til later
                 return df_
             else:
                 # Sort the string labels, enforce deterministic order
@@ -322,44 +337,45 @@ def process_benchmark_dataset(join_train=False):
                 assert lbs == d_lbs[split]  # Sanity check
                 lbs = datasets.ClassLabel(names=lbs)
                 features_ = datasets.Features(text=datasets.Value(dtype='string'), label=lbs)
-                # Map to integer labels so that compatible to training infrastructure
+                # Map to integer labels so that compatible to current training infrastructure in `gpt2.py`
                 df_.label.replace(to_replace=lbs.names, value=range(lbs.num_classes), inplace=True)
-                # d_ = datasets.Dataset.from_pandas(df, features=features)
-                # ic(d_[:5], features)
                 return datasets.Dataset.from_pandas(df_, features=features_)
         return datasets.DatasetDict({split: json2dset(split, dset) for split, dset in dsets_.items()})
     d_dsets = {dnm: path2dsets(dnm, d) for dnm, d in config('benchmark.datasets').items()}
-    # ic(d_dsets)
-    if join_train:
+    # for dnm, dsets in d_dsets.items():
+    #     ic(dnm, list(dsets))
+    # exit(1)
+    if join:
         # TODO: Which data for training? For now, merge all `train` splits
-        # def pre_concat(dset: datasets.Dataset) -> datasets.Dataset:
-        #     # Add new column
-        #     new_column = ['foo'] * len(dset)
-        #     dset = dset.add_column('dataset_id', new_column)
-        #     ic(dset)
-        #     exit(1)
-        # dset_train = datasets.concatenate_datasets([dsets['train'] for dsets in d_dsets.values()])
         dnm2id = config('benchmark.dataset_name2id')
 
         def pre_concat(dnm: str, df_: pd.DataFrame) -> pd.DataFrame:
             df_['dataset_id'] = [dnm2id[dnm]] * len(df_)  # Add dataset source information to each row
             return df_
-        df = pd.concat(pre_concat(dnm, dsets['train']) for dnm, dsets in d_dsets.items())
-        ic(len(df), df.iloc[:10])
-        # Keep internal feature label ordering same as dataset id
-        lbs_lb, lbs_dset = sorted(df.label.unique()), sorted(dnm2id, key=dnm2id.get)
+
+        # Global label across all datasets, all splits
+        # Needed for inversely mapping to local label regardless of joined split, e.g. train/test,
+        #   in case some label only in certain split
+        lbs_lb = sorted(set(join_its(df.label.unique() for dsets in d_dsets.values() for df in dsets.values())))
         lbs_lb = datasets.ClassLabel(names=lbs_lb)
-        df.label.replace(to_replace=lbs_lb.names, value=range(lbs_lb.num_classes), inplace=True)
-        ic(lbs_lb, lbs_dset)
-        features = datasets.Features(
-            text=datasets.Value(dtype='string'), label=lbs_lb, dataset_id=datasets.ClassLabel(names=lbs_dset)
+
+        def dfs2dset(dfs: Iterable[pd.DataFrame]) -> datasets.Dataset:
+            df = pd.concat(dfs)
+            # The string labels **may overlap** across the datasets
+            # Keep internal feature label ordering same as dataset id
+            lbs_dset = sorted(dnm2id, key=dnm2id.get)
+            df.label.replace(to_replace=lbs_lb.names, value=range(lbs_lb.num_classes), inplace=True)
+            features = datasets.Features(
+                text=datasets.Value(dtype='string'), label=lbs_lb, dataset_id=datasets.ClassLabel(names=lbs_dset)
+            )
+            return datasets.Dataset.from_pandas(df, features=features)
+        tr = dfs2dset(pre_concat(dnm, dsets['train']) for dnm, dsets in d_dsets.items())
+        vl = dfs2dset(
+            pre_concat(dnm, dsets['test'] if dnm != 'clinc' else dsets['val'])  # TODO: how to combine the splits?
+            for dnm, dsets in d_dsets.items()
         )
-        dset = datasets.Dataset.from_pandas(df, features=features)
-        dset.save_to_disk(os.path.join(path_dset, 'processed', 'benchmark_joined'))
-        ic(dset, dset[:10])
-        # The string labels may overlap
-        # assert len(lbs) == sum(len(config(f'benchmark.datasets.{dnm}.labels.train')) for dnm in d_dsets)
-        # lbs_lb = datasets.ClassLabel(names=lbs_lb)
+        dsets = datasets.DatasetDict(train=tr, test=vl)
+        dsets.save_to_disk(os.path.join(path_dset, 'processed', 'benchmark_joined'))
     else:
         for dnm, dsets in d_dsets.items():
             dsets.save_to_disk(os.path.join(path_dset, 'processed', dnm))
@@ -373,4 +389,12 @@ if __name__ == '__main__':
     # ic(fmt_num(124439808))
 
     # process_benchmark_dataset()
-    process_benchmark_dataset(join_train=True)
+    process_benchmark_dataset(join=True)
+
+    def sanity_check():
+        dset = datasets.load_from_disk(
+            os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined')
+        )['test']
+        lbs = dset.features['label']
+        ic(dset[60], lbs.int2str(118))
+    # sanity_check()

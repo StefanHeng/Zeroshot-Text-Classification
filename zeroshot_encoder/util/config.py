@@ -33,8 +33,8 @@ config = {
         )
     },
     'baselines': {
-        'gpt2-0shot': dict(
-            templates=[
+        'gpt2-nvidia': {
+            'templates': [
                 'To which category does the following document belong? : {}',
                 'To which category does the following text belong? : {}',
                 'To which category does the text belong? : {}',
@@ -61,8 +61,16 @@ config = {
                 'Which of these categories best describes the following document? : {}',
                 'Which of these choices best describes the following document? : {}',
                 'Which of these options best describes the following text? : {}'
-            ]
-        )
+            ],
+            'label-descriptors': dict(  # string label to natural language descriptor, as in paper
+                ag_news={
+                    'World': 'World News',
+                    'Sports': 'Sports',
+                    'Business': 'Business',
+                    'Sci/Tech': 'Science & Technology'
+                }
+            )
+        }
     },
     'benchmark': dict(
         datasets=dict(
@@ -91,7 +99,7 @@ def path2dataset_labels(path: str) -> Dict[str, List[str]]:
         dsets: Dict = json.load(fl)
 
     def samples2lbs(dset: List) -> List[str]:
-        return sorted(set(lb for (txt, lb) in dset))  # Heuristic on how the `json` are stored
+        return sorted(lb for (txt, lb) in dset)  # Heuristic on how the `json` are stored
     return {split: samples2lbs(dset) for split, dset in dsets.items()}  # Labels for each split
 
 

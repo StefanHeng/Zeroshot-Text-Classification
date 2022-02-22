@@ -27,7 +27,7 @@
         }
     },
     "baselines": {
-        "gpt2-0shot": {
+        "gpt2-nvidia": {
             "templates": [
                 "To which category does the following document belong? : {}",
                 "To which category does the following text belong? : {}",
@@ -55,7 +55,15 @@
                 "Which of these categories best describes the following document? : {}",
                 "Which of these choices best describes the following document? : {}",
                 "Which of these options best describes the following text? : {}"
-            ]
+            ],
+            "label-descriptors": {
+                "ag_news": {
+                    "World": "World News",
+                    "Sports": "Sports",
+                    "Business": "Business",
+                    "Sci/Tech": "Science & Technology"
+                }
+            }
         }
     },
     "benchmark": {
