@@ -386,7 +386,6 @@ def compute_metrics(eval_pred):
     labels, predictions = labels.flatten(), predictions.flatten()  # Original 2D tensor gives error
     msk_non_pad = (labels != PT_LOSS_PAD)
     labels, predictions = labels[msk_non_pad], predictions[msk_non_pad]
-    # ic(labels, predictions)
     return compute_metrics.metric.compute(predictions=predictions, references=labels)
 
 
@@ -582,9 +581,6 @@ class MyLoggingCallback(TrainerCallback):
             ('learning rate', lr), ('batch shape', (self.bsz, seq_max_len)), ('#epochs', n_ep)
         ])
         self.steps = max(math.ceil(len(dset_tr__) // self.bsz), 1) * n_ep  # #step/epoch at least 1
-        # ic(len(dset_tr__), self.bsz, n_ep)
-        # ic(self.steps)
-        # exit(1)
         self.called_val_init = False
         self.log_hist: List[Dict] = []
 
@@ -856,14 +852,11 @@ class CustomTrainer(Trainer):
             labels_ = inputs['labels'].detach()
             # CLM, predicting the next token given current, so shift
             # Last prediction is not part of input label, 1st input is fed into model & not predicted
-            # ic(preds, labels_)
             preds, labels_ = preds[:, :-1], labels_[:, 1:]
             mask_non_pad = labels_ != PT_LOSS_PAD  # Consider only the actual tokens for accuracy
             preds_non_pad, labels_non_pad = preds[mask_non_pad], labels_[mask_non_pad]
             matches: torch.Tensor = (preds_non_pad == labels_non_pad)
-            # ic(preds_non_pad, labels_non_pad)
             d_log = dict(src='compute_loss', acc=round((matches.sum() / preds_non_pad.numel()).item(), 4))
-            # ic(d_log)
 
             if self.compute_cls_acc:
                 token_type_ids, dataset_id = inputs['token_type_ids'].detach(), inputs['dataset_id'].detach()
@@ -896,12 +889,6 @@ class CustomTrainer(Trainer):
 
                 sample2idxs_n_lbs = {i_sample: get_labels(i_sample, idxs) for i_sample, idxs in sample2idxs.items()}
                 sample2idxs_n_lbs = {k: v for k, v in sample2idxs_n_lbs.items() if v is not None}
-                # ic(sample2idxs_n_lbs)
-                i_sample = 0
-                d = sample2idxs_n_lbs[i_sample]
-                idxs, labels__ = d['idxs'], d['labels']
-                pred = preds[i_sample, d['idxs']].tolist()
-                # print('idxs: ', idxs, ', labels: ', labels__, ', pred: ', pred, ', equal? ', pred == labels__)
                 d_log['classification_acc_meta'] = dict(
                     # prediction ids match label ids
                     n_acc=sum(
@@ -911,8 +898,6 @@ class CustomTrainer(Trainer):
                     n_total=len(sample2idxs_n_lbs),  # Number of samples with complete label
                     n_missing=dataset_id.numel()-len(sample2idxs_n_lbs)
                 )
-                # print(d_log)
-                # exit(1)
         # ========================== End of added ==========================
 
         # Save past state if it exists
