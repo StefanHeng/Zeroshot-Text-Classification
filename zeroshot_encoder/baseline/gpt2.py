@@ -28,15 +28,13 @@ def get_dset(
     if n_sample is not None:
         tr = tr.select(range(n_sample))
         vl = vl.select(range(n_sample))
-    # ic(tr[60], vl[60])
     if map_func is not None:
-        # tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=4)
-        # vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=4)
         num_proc = None
         n_cpu = os.cpu_count()
         if fast and n_cpu >= 2:
             num_proc = n_cpu // 2
             datasets.set_progress_bar_enabled(False)
+
         tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
         vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
         datasets.set_progress_bar_enabled(True)
@@ -134,9 +132,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(i, dataset_id: int, text: str, label: int):
-            # ic(self.dset_id2name)
             dset_nm = config('benchmark.dataset_id2name')[dataset_id]
-            # ic(i, dset_nm, dataset_id, text, label)
             if is_benchmark:
                 labels = config(f'benchmark.datasets.{dset_nm}.labels.train')  # TODO: Assume `train` split
                 n_cls = len(labels)
@@ -156,13 +152,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     self.cache_bm = datasets.load_from_disk(
                         os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined')
                     )['train'].features['label']  # TODO: assume `train` split
-                # if self.cache_bm.int2str(label) not in labels:
-                #     for lb in self.cache_bm.names:
-                #         ic(lb, self.cache_bm.str2int(lb))
-                #     ic(n_cls, label, self.cache_bm.int2str(label), labels)
-                import random
-                if random.randint(0, 10000) == 0:
-                    ic(text, self.cache_bm.int2str(label))
                 label = labels.index(self.cache_bm.int2str(label))  # Index is int label
             else:
                 n_cls, lb_int2desc = (self.cache[dset_nm][k] for k in ('n_classes', 'label2feature_str'))
@@ -171,7 +160,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             np.random.shuffle(idx_lbs)
             strs_lb = ' , '.join(f'" {lb_int2desc[idx]} "' for idx in idx_lbs)
             question = self.templates[idxs_tpl[i]].format(strs_lb)
-            # ic(label, lb_int2desc)
             answer = lb_int2desc[label]
 
             ids_ques = self._call_paren(question, **kwargs)
@@ -210,8 +198,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             out = {k: pad(ints, k) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
-            # ic(ids, self.decode(ids))
-            # exit(1)
             out['dataset_id'] = dataset_id  # For computing zero-shot classification accuracy
             return out
         if is_batched:
@@ -245,6 +231,9 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
 
     def forward(self, dataset_id=None, **kwargs):
         # Function override to ignore `dataset_id`, not need in learning; Just need to pass value for evaluation
+        # ids = kwargs['input_ids']  # Sanity check
+        # for ids_ in ids:
+        #     print(tokenizer.decode(ids_))
         return super().forward(**kwargs)
 
     @classmethod
@@ -395,7 +384,7 @@ def compute_metrics(eval_pred):
 
 
 def get_all_setup(
-        model_name, dataset_name='ag_news', n_sample=None, random_seed=None, do_eval=True, custom_logging=True
+        model_name, dataset_name: str = 'ag_news', n_sample=None, random_seed=None, do_eval=True, custom_logging=True
 ) -> Tuple[
     GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling, TrainingArguments,
     datasets.Dataset, datasets.Dataset, Trainer
@@ -1001,15 +990,18 @@ if __name__ == '__main__':
 
     # dnm = 'ag_news'
     dnm = 'benchmark_joined'
-    # nm, n = 'debug', 1024
-    # nm, n = 'debug-gpt-ori', None
-    nm, n = 'debug-large', None
-    # nm, n = 'gpt2', None
+
+    # nm = 'debug'
+    # nm = 'debug-gpt-ori'
+    nm = 'debug-large'
+    # nm = 'gpt2'
+
+    # n = 8
+    n = 1024
+    # n = None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
-    # import psutil
-    # ic(f"RAM used: {psutil.Process().memory_info().rss / (1024 * 1024):.2f} MB")
     trainer.train()
     trainer.save_model(os.path.join(trainer.args.output_dir))
     trainer.evaluate()

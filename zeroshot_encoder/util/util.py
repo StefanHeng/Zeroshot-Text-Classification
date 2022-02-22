@@ -342,9 +342,6 @@ def process_benchmark_dataset(join=False):
                 return datasets.Dataset.from_pandas(df_, features=features_)
         return datasets.DatasetDict({split: json2dset(split, dset) for split, dset in dsets_.items()})
     d_dsets = {dnm: path2dsets(dnm, d) for dnm, d in config('benchmark.datasets').items()}
-    # for dnm, dsets in d_dsets.items():
-    #     ic(dnm, list(dsets))
-    # exit(1)
     if join:
         # TODO: Which data for training? For now, merge all `train` splits
         dnm2id = config('benchmark.dataset_name2id')
