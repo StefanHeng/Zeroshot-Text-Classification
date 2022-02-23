@@ -578,8 +578,9 @@ class MyLoggingCallback(TrainerCallback):
         self.logger_fl.setLevel(logging.DEBUG)
         self.fl_handler = None
 
-        self.out_dict: Dict[str, Union[str, int, float, List]] = None
+        self.out_dict_tr: Dict[str, Union[str, int, float, List]] = None
         self.is_compute_loss_on_train = True
+        self.k_acc = 'acc_meta'
         self.k_cls = 'classification_acc_meta'  # See `CustomTrainer`
         self.k_cls_eval = f'{self.k_cls}_eval'
 
@@ -693,21 +694,24 @@ class MyLoggingCallback(TrainerCallback):
             if self.interactive:
                 self.plot.update(self.log_hist)
 
-        def cls_stats2dict(d_stats: List[Dict], n_sample: int, prefix: str) -> Dict:
+        def cls_stats2dict(out_dict: Dict, n_sample: int, prefix: str) -> Dict:
             """
-            Convert `classification_acc_meta` dict to stats for logging
+            Convert `acc_meta`, `classification_acc_meta` dict to stats for logging
             """
-            stats: pd.Series = pd.DataFrame(d_stats).sum(axis=0)
+            stats_acc: pd.Series = pd.DataFrame(out_dict[self.k_acc]).sum(axis=0)
+            # ic(stats_acc)
+            stats_acc_cls: pd.Series = pd.DataFrame(out_dict[self.k_cls]).sum(axis=0)
             return {
-                f'{prefix}_acc_cls': stats.n_acc/stats.n_total if stats.n_total != 0 else 0,
-                f'{prefix}_acc_mis': stats.n_missing/n_sample  # As a fraction
+                f'{prefix}_acc': stats_acc.n_acc / stats_acc.n_total,
+                f'{prefix}_acc_cls': (stats_acc_cls.n_acc/stats_acc_cls.n_total) if stats_acc_cls.n_total != 0 else 0,
+                f'{prefix}_acc_mis': stats_acc_cls.n_missing/n_sample  # As a fraction
             }
 
         def set_eval_cls_acc():  # TODO: support gradient accumulation
-            stats_cls_acc: List[Dict] = self.out_dict.pop(self.k_cls_eval)
+            stats_cls_acc: List[Dict] = self.out_dict_tr.pop(self.k_cls_eval)
             stats_cls_acc: Dict = {k: sum(d[k] for d in stats_cls_acc) for k in stats_cls_acc[0]}
-            self.out_dict = {
-                **self.out_dict,
+            self.out_dict_tr = {
+                **self.out_dict_tr,
                 **cls_stats2dict(stats_cls_acc, self.n_eval, prefix='eval')
             }
 
@@ -718,112 +722,123 @@ class MyLoggingCallback(TrainerCallback):
         if state.is_local_process_zero:
             if self.mode == 'train':
                 step = state.global_step
-                if self.do_eval:
-                    if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
-                        if step == 0:  # Before model runs, initial call
-                            if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
-                                # Got to here, cos the 1st, training compute_loss logging
-                                assert self.is_compute_loss_on_train
-                                self.called_val_init = True
-                                tr_acc, tr_loss, n_ep = (logs[k] for k in ('acc', 'loss', 'epoch'))
-                                self.out_dict = {
-                                    **dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss,),
-                                    **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
-                                }
-
-                                # Prep for Trainer internal evaluation call
-                                self.is_compute_loss_on_train = False
-                                out: Dict = self.parent_trainer.evaluate()  # Expanded to branch below then comes back
-                                # Disable, seems like an edge case 1st training step, not sure ow
-                                # self.is_compute_loss_on_train = True
-                                n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in (
-                                    'epoch', 'eval_accuracy', 'eval_loss'
-                                ))
-                                assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
-                                assert n_ep == n_ep_ and n_ep == 0
-                                # python3.6 compatibility
-                                self.out_dict.update(dict(eval_acc=vl_acc, eval_loss=vl_loss))
-
-                                set_eval_cls_acc()
-                                log_update(self.out_dict)
-                            elif not self.is_compute_loss_on_train:  # `compute_loss` ran on evaluation set
-                                # => Keep track of the batch-wise classification accuracy
-                                if self.k_cls_eval not in self.out_dict:
-                                    self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
-                                else:
-                                    self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
-                        else:  # Need to look for the accuracy calculated for the training batch
-                            # Heuristic: 1st call to `compute_loss` corresponds to training
-                            if self.is_compute_loss_on_train:
-                                self.is_compute_loss_on_train = False
-                                acc, loss = logs.get('acc', None), logs.get('loss', None)
-                                assert acc is not None and loss is not None
-                                if self.out_dict is None:
-                                    # Now is the 1st call, after logging for last batch completes
-                                    self.out_dict = {
-                                        **dict(step=step, train_acc=acc, train_loss=loss),
-                                        **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
-                                    }
-                            else:  # On eval set, keep track like above
-                                if self.k_cls_eval not in self.out_dict:
-                                    self.out_dict[self.k_cls_eval] = [logs[self.k_cls]]
-                                else:
-                                    self.out_dict[self.k_cls_eval].append(logs[self.k_cls])
-                    elif 'loss' in logs:  # Internal training log
-                        # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
-                        # But log anyway, for after gradient update, evaluation loss changes
-                        tr_loss, lr, n_ep = (logs.get(k, None) for k in ('loss', 'learning_rate', 'epoch'))
-                        assert all(elm is not None for elm in (tr_loss, lr, n_ep))
-                        tr_loss_compute: int = self.out_dict.get('train_loss', None)
-                        # Without overriding `_maybe_log_save_evaluate`,
-                        # can only get the training loss with 4 decimal place
-                        assert round(tr_loss_compute, 4) == tr_loss
-                        # See Trainer.train(); compute_loss executes before step increments
-                        assert self.out_dict['step'] == step-1  # Override step & loss
-                        self.out_dict.update(dict(step=step, train_loss=tr_loss, lr=lr, epoch=n_ep))
-                    elif 'eval_loss' in logs:
-                        if step != 0:
-                            vl_loss, vl_acc, n_ep_ = (
-                                logs.get(k, None) for k in ('eval_loss', 'eval_accuracy', 'epoch')
-                            )
-                            assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
-                            assert step == self.out_dict['step']
-                            assert n_ep_ == self.out_dict['epoch']
-                            # python3.6 compatibility
-                            self.out_dict.update(dict(eval_loss=vl_loss, eval_acc=vl_acc))
-
-                            set_eval_cls_acc()
-                            log_update(self.out_dict)
-                            self.out_dict = None
-                            self.is_compute_loss_on_train = True
-                    elif any('runtime' in k for k in logs.keys()):
-                        log_default(logs)
-                    else:
-                        print('unhandled case', logs)
-                        exit(1)
-                else:  # Only training without evaluation supported
-                    if 'src' in logs and logs['src'] == 'compute_loss':
-                        # For gradient_accumulation, many batches of `compute_loss` may be called,
-                        # before going into train logging
-                        tr_acc, tr_loss, n_ep = (logs[k] for k in ('acc', 'loss', 'epoch'))
-                        # Loss here is per batch, not per gradient update
-                        self.out_dict = dict(step=step, epoch=n_ep, train_acc=tr_acc)
+                # if self.do_eval:
+                #     if 'src' in logs and logs['src'] == 'compute_loss':  # Custom added metric computation
+                #         if step == 0:  # Before model runs, initial call
+                #             if not self.called_val_init:  # Prevents circular logging call, see Trainer.evaluate()
+                #                 # Got to here, cos the 1st, training compute_loss logging
+                #                 assert self.is_compute_loss_on_train
+                #                 self.called_val_init = True
+                #                 tr_acc, tr_loss, n_ep = (logs[k] for k in ('acc', 'loss', 'epoch'))
+                #                 self.out_dict_tr = {
+                #                     **dict(step=step, epoch=0, train_acc=tr_acc, train_loss=tr_loss,),
+                #                     **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
+                #                 }
+                #
+                #                 # Prep for Trainer internal evaluation call
+                #                 self.is_compute_loss_on_train = False
+                #                 out: Dict = self.parent_trainer.evaluate()  # Expanded to branch below then comes back
+                #                 # Disable, seems like an edge case 1st training step, not sure ow
+                #                 # self.is_compute_loss_on_train = True
+                #                 n_ep_, vl_acc, vl_loss = (out.get(k, None) for k in (
+                #                     'epoch', 'eval_accuracy', 'eval_loss'
+                #                 ))
+                #                 assert all(elm is not None for elm in (n_ep, vl_acc, vl_loss))
+                #                 assert n_ep == n_ep_ and n_ep == 0
+                #                 # python3.6 compatibility
+                #                 self.out_dict_tr.update(dict(eval_acc=vl_acc, eval_loss=vl_loss))
+                #
+                #                 set_eval_cls_acc()
+                #                 log_update(self.out_dict_tr)
+                #             elif not self.is_compute_loss_on_train:  # `compute_loss` ran on evaluation set
+                #                 # => Keep track of the batch-wise classification accuracy
+                #                 if self.k_cls_eval not in self.out_dict_tr:
+                #                     self.out_dict_tr[self.k_cls_eval] = [logs[self.k_cls]]
+                #                 else:
+                #                     self.out_dict_tr[self.k_cls_eval].append(logs[self.k_cls])
+                #         else:  # Need to look for the accuracy calculated for the training batch
+                #             # Heuristic: 1st call to `compute_loss` corresponds to training
+                #             if self.is_compute_loss_on_train:
+                #                 self.is_compute_loss_on_train = False
+                #                 acc, loss = logs.get('acc', None), logs.get('loss', None)
+                #                 assert acc is not None and loss is not None
+                #                 if self.out_dict_tr is None:
+                #                     # Now is the 1st call, after logging for last batch completes
+                #                     self.out_dict_tr = {
+                #                         **dict(step=step, train_acc=acc, train_loss=loss),
+                #                         **cls_stats2dict(logs[self.k_cls], self.bsz, prefix='train')
+                #                     }
+                #             else:  # On eval set, keep track like above
+                #                 if self.k_cls_eval not in self.out_dict_tr:
+                #                     self.out_dict_tr[self.k_cls_eval] = [logs[self.k_cls]]
+                #                 else:
+                #                     self.out_dict_tr[self.k_cls_eval].append(logs[self.k_cls])
+                #     elif 'loss' in logs:  # Internal training log
+                #         # Edge case step = 1: Before training start, i.e. step=1, stats for training already logged,
+                #         # But log anyway, for after gradient update, evaluation loss changes
+                #         tr_loss, lr, n_ep = (logs.get(k, None) for k in ('loss', 'learning_rate', 'epoch'))
+                #         assert all(elm is not None for elm in (tr_loss, lr, n_ep))
+                #         tr_loss_compute: int = self.out_dict_tr.get('train_loss', None)
+                #         # Without overriding `_maybe_log_save_evaluate`,
+                #         # can only get the training loss with 4 decimal place
+                #         assert round(tr_loss_compute, 4) == tr_loss
+                #         # See Trainer.train(); compute_loss executes before step increments
+                #         assert self.out_dict_tr['step'] == step - 1  # Override step & loss
+                #         self.out_dict_tr.update(dict(step=step, train_loss=tr_loss, lr=lr, epoch=n_ep))
+                #     elif 'eval_loss' in logs:
+                #         if step != 0:
+                #             vl_loss, vl_acc, n_ep_ = (
+                #                 logs.get(k, None) for k in ('eval_loss', 'eval_accuracy', 'epoch')
+                #             )
+                #             assert all(elm is not None for elm in (vl_loss, vl_acc, n_ep_))
+                #             assert step == self.out_dict_tr['step']
+                #             assert n_ep_ == self.out_dict_tr['epoch']
+                #             # python3.6 compatibility
+                #             self.out_dict_tr.update(dict(eval_loss=vl_loss, eval_acc=vl_acc))
+                #
+                #             set_eval_cls_acc()
+                #             log_update(self.out_dict_tr)
+                #             self.out_dict_tr = None
+                #             self.is_compute_loss_on_train = True
+                #     elif any('runtime' in k for k in logs.keys()):
+                #         log_default(logs)
+                #     else:
+                #         print('unhandled case', logs)
+                #         exit(1)
+                # else:  # Only training without evaluation supported
+                if 'src' in logs and logs['src'] == 'compute_loss':
+                    # For gradient_accumulation, many batches of `compute_loss` may be called,
+                    # before going into train logging
+                    # Loss here is per batch, not per gradient update, ignore
+                    if self.out_dict_tr is None:
+                        n_ep = logs['epoch']
+                        self.out_dict_tr = {'step': step, 'epoch': n_ep, self.k_acc: [logs[self.k_acc]]}
+                        # Aggregate accuracy & classification accuracy counts
                         if self.parent_trainer.compute_cls_acc:
-                            if self.k_cls not in self.out_dict:  # Aggregate classification accuracy counts
-                                self.out_dict[self.k_cls] = [logs[self.k_cls]]
-                            else:
-                                self.out_dict[self.k_cls].append(logs[self.k_cls])
-                    elif 'loss' in logs:  # The Trainer default training loss logging
-                        self.out_dict.update(cls_stats2dict(self.out_dict[self.k_cls], self.bsz, prefix='train'))
-                        del self.out_dict[self.k_cls]
-                        self.out_dict['learning_rate'] = logs['learning_rate']
-                        self.out_dict['train_loss'] = logs['loss']
-                        log_update(self.out_dict)
-                    elif any('runtime' in k for k in logs.keys()):
-                        self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
-                    else:
-                        print('unhandled case', logs)
-                        exit(1)
+                            self.out_dict_tr[self.k_cls] = [logs[self.k_cls]]
+                    else:  # Later batch in the same gradient accumulation
+                        step_, n_ep = self.out_dict_tr['step'], self.out_dict_tr['epoch']
+                        n_ep_ = logs['epoch']
+                        assert step_ == step and n_ep_ == n_ep
+                        self.out_dict_tr[self.k_acc].append(logs[self.k_acc])
+                        if self.parent_trainer.compute_cls_acc:
+                            self.out_dict_tr[self.k_cls].append(logs[self.k_cls])
+                    # ic(self.out_dict_tr)
+                elif 'loss' in logs:  # The Trainer default training loss logging
+                    # Take the averaging by parent `Trainer` for granted
+                    self.out_dict_tr.update(cls_stats2dict(self.out_dict_tr, self.bsz, prefix='train'))
+                    del self.out_dict_tr[self.k_acc]
+                    del self.out_dict_tr[self.k_cls]
+                    self.out_dict_tr['learning_rate'] = logs['learning_rate']
+                    self.out_dict_tr['train_loss'] = logs['loss']
+                    # ic(self.out_dict_tr)
+                    log_update(self.out_dict_tr)
+                    self.out_dict_tr = None  # Rest for next global step
+                elif any('runtime' in k for k in logs.keys()):
+                    self.logger.info(log_dict(logs) if isinstance(logs, dict) else logs)
+                else:
+                    print('unhandled case', logs)
+                    exit(1)
             else:
                 if 'src' not in logs:  # Skip custom compute_loss logging
                     log_default(logs)
@@ -896,7 +911,7 @@ class CustomTrainer(Trainer):
             mask_non_pad = labels_ != PT_LOSS_PAD  # Consider only the actual tokens for accuracy
             preds_non_pad, labels_non_pad = preds[mask_non_pad], labels_[mask_non_pad]
             matches: torch.Tensor = (preds_non_pad == labels_non_pad)
-            d_log = dict(src='compute_loss', acc=round((matches.sum() / preds_non_pad.numel()).item(), 4))
+            d_log = dict(src='compute_loss', acc_meta=dict(n_acc=matches.sum().item(), n_total=preds_non_pad.numel()))
 
             if self.compute_cls_acc:
                 token_type_ids, dataset_id = inputs['token_type_ids'].detach(), inputs['dataset_id'].detach()
@@ -1061,8 +1076,9 @@ if __name__ == '__main__':
     nm = 'gpt2-medium'
 
     # n = 1
-    # n = 1024
-    n = None
+    n = 1024
+    # n = 256
+    # n = None
     model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
