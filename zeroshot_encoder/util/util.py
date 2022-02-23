@@ -383,6 +383,25 @@ def process_benchmark_dataset(join=False):
             dsets.save_to_disk(os.path.join(path_dset, 'processed', dnm))
 
 
+def map_ag_news():
+    dnm = 'ag_news'
+    d_dset = config(f'benchmark.datasets.{dnm}')
+    ext = config('benchmark.dataset_ext')
+    path_dset = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
+    path = d_dset['path']
+    path = os.path.join(path_dset, f'{path}.{ext}')
+    # ic(path)
+    with open(path) as f:
+        dsets: Dict = json.load(f)
+    # ic(dsets['train'][:10])
+    d_lb2desc = config(f'baselines.gpt2-nvidia.label-descriptors.{dnm}')
+    # ic(d_lb2desc)
+    for split, dset in dsets.items():
+        dsets[split] = [[txt, d_lb2desc[lb]] for txt, lb in dset]
+    with open(os.path.join(path_dset, f'{dnm}.json'), 'w') as f:
+        json.dump(dsets, f, indent=4)
+
+
 if __name__ == '__main__':
     from icecream import ic
 
@@ -391,7 +410,7 @@ if __name__ == '__main__':
     # ic(fmt_num(124439808))
 
     # process_benchmark_dataset()
-    process_benchmark_dataset(join=True)
+    # process_benchmark_dataset(join=True)
 
     def sanity_check():
         dset = datasets.load_from_disk(
@@ -400,3 +419,5 @@ if __name__ == '__main__':
         lbs = dset.features['label']
         ic(dset[60], lbs.int2str(118))
     # sanity_check()
+
+    map_ag_news()
