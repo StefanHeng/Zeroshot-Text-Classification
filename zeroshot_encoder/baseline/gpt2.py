@@ -18,38 +18,6 @@ from zeroshot_encoder.util import *
 PT_LOSS_PAD = -100  # Pytorch indicator value for ignoring loss, used in huggingface for padding tokens
 
 
-def get_dset(
-        dataset_name='ag_news',
-        map_func: Callable = None, remove_columns: Union[str, List[str]] = None,
-        n_sample: int = None, random_seed: int = None, fast=True
-) -> Tuple[datasets.Dataset, ...]:
-    if dataset_name == 'benchmark_joined':
-        dset = datasets.load_from_disk(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined'))
-    else:
-        dset = load_dataset(dataset_name)
-    tr, vl = dset['train'], dset['test']
-    if n_sample is not None:
-        tr = tr.select(range(n_sample))
-        vl = vl.select(range(n_sample))
-    if map_func is not None:
-        num_proc = None
-        n_cpu = os.cpu_count()
-        if fast and n_cpu >= 2:
-            num_proc = n_cpu // 2
-            datasets.set_progress_bar_enabled(False)
-
-        tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
-        vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
-        datasets.set_progress_bar_enabled(True)
-
-        if 'dataset_name' in tr.column_names:
-            tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
-            vl = vl.remove_columns('dataset_name')
-    if random_seed:
-        tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
-    return tr, vl
-
-
 class ZsGPT2Tokenizer(GPT2TokenizerFast):
     """
     A wrapper around GPT2 tokenizer for 0-shot classification tokenizing
@@ -107,7 +75,11 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('type_ques', 'type_text', 'type_answ')
         )  # Type tokens
 
-        self.warned_desc = set()  # Warning for each dataset happens once
+        self.warned_desc = set()  # Warning for each dataset happens once    @property
+
+    @property
+    def max_len_single_sentence(self) -> int:
+        return self.model_max_length - 2 * 3  # 3 pairs of (special start token, eos token)
 
     def _call_paren(self, s: str, **kwargs) -> List[int]:
         return super().__call__(s, **kwargs)['input_ids']
@@ -137,37 +109,46 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         def call_single(i, dataset_id: int, text: str, label: int):
             dset_nm = config('benchmark.dataset_id2name')[dataset_id]
             if is_benchmark:
-                labels = config(f'benchmark.datasets.{dset_nm}.labels.train')  # TODO: Assume `train` split
-                n_cls = len(labels)
-                d_lb2desc, lb_int2desc = config(f'baselines.gpt2-nvidia'), None
-                # The ordering indicates int<=>str label mapping, see `process_benchmark_dataset`
-                if dset_nm in d_lb2desc:  # TODO: make descriptors for each dataset?
-                    lb_int2desc = d_lb2desc[dset_nm]
-                    lb_int2desc = {i: lb_int2desc[s] for i, s in enumerate(labels)}
-                else:
-                    lb_int2desc = {i: lb for i, lb in enumerate(labels)}
-                    if dset_nm not in self.warned_desc:
-                        warn(f'Labels for dataset {dset_nm} may not be descriptive with labels {labels}')
-                        self.warned_desc.add(dset_nm)
-
+                descs = config(f'benchmark.datasets.{dset_nm}.labels.train')  # TODO: Assume `train` split
+                n_cls = len(descs)
                 # `label` is shared across all datasets, map to local label within dataset
                 if self.cache_bm is None:
                     self.cache_bm = datasets.load_from_disk(
                         os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined')
                     )['train'].features['label']  # TODO: assume `train` split
-                label = labels.index(self.cache_bm.int2str(label))  # Index is int label
+                # The ordering indicates int<=>str label mapping, i.e., index is int label,
+                # see `process_benchmark_dataset`
+
+                def lb_int2desc(lb: int) -> str:
+                    """
+                    Map from local dataset label ordinal, in range(n_cls) to the descriptor
+                    """
+                    return descs[lb]
+                answer = self.cache_bm.int2str(label)
             else:
-                n_cls, lb_int2desc = (self.cache[dset_nm][k] for k in ('n_classes', 'label2feature_str'))
+                n_cls, label2feature_str = (self.cache[dset_nm][k] for k in ('n_classes', 'label2feature_str'))
+
+                def lb_int2desc(lb: int) -> str:
+                    return label2feature_str[lb]
+                answer = label2feature_str[label]
 
             idx_lbs = np.arange(n_cls)
             np.random.shuffle(idx_lbs)
-            strs_lb = ' , '.join(f'" {lb_int2desc[idx]} "' for idx in idx_lbs)
+            strs_lb = ' , '.join(f'" {lb_int2desc(idx)} "' for idx in idx_lbs)
             question = self.templates[idxs_tpl[i]].format(strs_lb)
-            answer = lb_int2desc[label]
 
             ids_ques = self._call_paren(question, **kwargs)
             ids_text = self._call_paren(text, **kwargs)
             ids_answ = self._call_paren(answer, **kwargs)
+            ln_q, ln_t, ln_a = len(ids_ques), len(ids_text), len(ids_answ)
+            ln_total = ln_q + ln_t + ln_a
+            if ln_total > self.max_len_single_sentence:
+                # Crop the text portion, keep question and label intact, i.e., ensure no classification label is cropped
+                ln_t_ = self.max_len_single_sentence - (ln_q + ln_a)
+                assert ln_t_ > 0
+                warn(f'Sample longer than model max sequence length: {ln_total+6} > {self.model_max_length}'
+                     f' - Text portion cropped: {ln_t} > {ln_t_}')
+                ids_text = ids_text[:ln_t_]
             # Number of contex tokens, up until answer token, inclusive
             n_ques, n_text, n_answ = (1 + len(ids_ques) + 1), (1 + len(ids_text) + 1), (1 + len(ids_answ) + 1)
             n_cont = n_ques + n_text + 1
@@ -216,27 +197,28 @@ class ZsGPT2Model(GPT2Model):
     """
     Modifying the `GPT2Model` for 0-shot classification paper
     """
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config_):
+        super().__init__(config_)
         # Override internal state, instead of adding internal state, so that forward pass stays untouched
         # Double the positional embedding matrix, as if stacking the context & output embedding matrices together
         # See positional id assignment in `ZsGPT2Tokenizer`
-        self.wpe = nn.Embedding(config.max_position_embeddings*2, self.embed_dim)
+        self.wpe = nn.Embedding(config_.max_position_embeddings*2, self.embed_dim)
 
 
 class ZsGPT2LMHeadModel(GPT2LMHeadModel):
     """
     So that `ZsGPT2Model` is loaded
     """
-    def __init__(self, config):
-        super().__init__(config)
-        self.transformer = ZsGPT2Model(config)  # Override internal state
+    def __init__(self, config_):
+        super().__init__(config_)
+        self.transformer = ZsGPT2Model(config_)  # Override internal state
 
     def forward(self, dataset_id=None, **kwargs):
         # Function override to ignore `dataset_id`, not need in learning; Just need to pass value for evaluation
-        # ids = kwargs['input_ids']  # Sanity check
-        # for ids_ in ids:
-        #     print(tokenizer.decode(ids_))
+        ids = kwargs['input_ids']  # Sanity check
+        pad = tkzer.enc_spec(tkzer.pad_token)
+        for ids_ in ids:
+            print(tkzer.decode(ids_[ids_ != pad]))
         return super().forward(**kwargs)
 
     @classmethod
@@ -255,6 +237,38 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
             else:
                 warn('Wrong model size, positional not loaded. This is expected in debugging')
         return md
+
+
+def get_dset(
+        dataset_name='ag_news',
+        map_func: Callable = None, remove_columns: Union[str, List[str]] = None,
+        n_sample: int = None, random_seed: int = None, fast=True
+) -> Tuple[datasets.Dataset, ...]:
+    if dataset_name == 'benchmark_joined':
+        dset = datasets.load_from_disk(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined'))
+    else:
+        dset = load_dataset(dataset_name)
+    tr, vl = dset['train'], dset['test']
+    if n_sample is not None:
+        tr = tr.select(range(n_sample))
+        vl = vl.select(range(n_sample))
+    if map_func is not None:
+        num_proc = None
+        n_cpu = os.cpu_count()
+        if fast and n_cpu >= 2:
+            num_proc = n_cpu // 2
+            datasets.set_progress_bar_enabled(False)
+
+        tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
+        vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
+        datasets.set_progress_bar_enabled(True)
+
+        if 'dataset_name' in tr.column_names:
+            tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
+            vl = vl.remove_columns('dataset_name')
+    if random_seed:
+        tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
+    return tr, vl
 
 
 def tokenize_func(tokenizer_, dataset_name='ag_news', max_length=None):
@@ -288,7 +302,7 @@ def get_model_n_tokenizer(model_name='gpt2') -> Tuple[
         model_ = ZsGPT2LMHeadModel.from_pretrained(pretrained_model_name, config=conf, ignore_mismatched_sizes=True)
         model_max_length = n_token
     else:
-        model_max_length = 512  # Reduce max seq len to 512 as in paper
+        model_max_length = 1024  # Keep max seq len of 1024, instead of 512 in paper, for longer texts & more labels
         conf = AutoConfig.from_pretrained(model_name)
         conf.update(dict(use_cache=False))  # For enabling `gradient_checkpointing`, see `get_train_setup`
         # Keep the 1024 token length, reducing to 512 tokens involves loading part of pretrained weights, complicated
@@ -333,7 +347,7 @@ def get_train_setup(model_name='gpt2', do_eval=True) -> TrainingArguments:
             batch_size=32,
             gradient_accumulation_steps=4,  # Effectively batch size 128 as in paper, to fit in memory
             weight_decay=1e-2,
-            num_train_epochs=1,
+            num_train_epochs=50,
             lr_scheduler_type=SchedulerType.COSINE,
         )
     }
@@ -370,8 +384,7 @@ def get_train_setup(model_name='gpt2', do_eval=True) -> TrainingArguments:
         log_level='warning',
         logging_strategy='steps',
         logging_steps=1,
-        save_steps=1000,
-        save_total_limit=32,
+        save_strategy='epoch',
         fp16=torch.cuda.is_available(),
         fp16_full_eval=torch.cuda.is_available(),
         optim=OptimizerNames.ADAMW_TORCH,
@@ -438,7 +451,7 @@ def get_all_setup(
 
     dset_tr_, dset_vl_ = get_dset(
         dataset_name=dataset_name, map_func=map_func, remove_columns=['label', 'text'],
-        n_sample=n_sample, random_seed=random_seed
+        n_sample=n_sample, random_seed=random_seed, fast='debug' not in model_name
     )
     trainer_args = dict(
         model=model_, args=train_args_, data_collator=data_collator_,
@@ -900,6 +913,7 @@ class CustomTrainer(Trainer):
 
         # ========================== Begin of added ==========================
         inputs: Dict[str, torch.Tensor]
+        d_log = None
         if self.custom_logging and 'labels' in inputs:
             preds = outputs.logits.detach().argmax(axis=-1)
             labels_ = inputs['labels'].detach()
@@ -1070,14 +1084,14 @@ if __name__ == '__main__':
     # nm = 'debug'
     # nm = 'debug-gpt-ori'
     # nm = 'debug-large'
-    # nm = 'gpt2'
-    nm = 'gpt2-medium'
+    nm = 'gpt2'
+    # nm = 'gpt2-medium'
 
     # n = 1
     # n = 1024
     # n = 256
     n = None
-    model, tokenizer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
+    md, tkzer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
         nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
     # ic(model_param_size(model))
