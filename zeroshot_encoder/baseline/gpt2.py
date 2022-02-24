@@ -1,3 +1,9 @@
+"""
+Implementation of NVIDIA-GPT2 approach.
+
+[Zero-shot Text Classification With Generative Language Models](https://arxiv.org/abs/1912.10165)
+"""
+
 from typing import Callable
 from warnings import warn
 
@@ -13,6 +19,7 @@ from transformers.training_args import OptimizerNames
 from datasets import load_dataset, load_metric
 
 from zeroshot_encoder.util import *
+from zeroshot_encoder.preprocess import *
 
 
 PT_LOSS_PAD = -100  # Pytorch indicator value for ignoring loss, used in huggingface for padding tokens
@@ -239,39 +246,7 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
         return md
 
 
-def get_dset(
-        dataset_name='ag_news',
-        map_func: Callable = None, remove_columns: Union[str, List[str]] = None,
-        n_sample: int = None, random_seed: int = None, fast=True
-) -> Tuple[datasets.Dataset, ...]:
-    if dataset_name == 'benchmark_joined':
-        dset = datasets.load_from_disk(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined'))
-    else:
-        dset = load_dataset(dataset_name)
-    tr, vl = dset['train'], dset['test']
-    if n_sample is not None:
-        tr = tr.select(range(n_sample))
-        vl = vl.select(range(n_sample))
-    if map_func is not None:
-        num_proc = None
-        n_cpu = os.cpu_count()
-        if fast and n_cpu >= 2:
-            num_proc = n_cpu // 2
-            datasets.set_progress_bar_enabled(False)
-
-        tr = tr.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
-        vl = vl.map(map_func, batched=True, remove_columns=remove_columns, num_proc=num_proc)
-        datasets.set_progress_bar_enabled(True)
-
-        if 'dataset_name' in tr.column_names:
-            tr = tr.remove_columns('dataset_name')  # TODO: Why is it added in the first place?
-            vl = vl.remove_columns('dataset_name')
-    if random_seed:
-        tr, vl = tr.shuffle(seed=random_seed), vl.shuffle(seed=random_seed)
-    return tr, vl
-
-
-def tokenize_func(tokenizer_, dataset_name='ag_news', max_length=None):
+def tokenize_func(tokenizer_: ZsGPT2Tokenizer, dataset_name='ag_news', max_length=None):
     def _tokenize_func(sample: Dict[str, List]):
         """
         :param sample: A batch of data samples
@@ -416,10 +391,7 @@ def compute_metrics(eval_pred):
 
 def get_all_setup(
         model_name, dataset_name: str = 'ag_news', n_sample=None, random_seed=None, do_eval=True, custom_logging=True
-) -> Tuple[
-    GPT2LMHeadModel, GPT2TokenizerFast, DataCollatorForLanguageModeling, TrainingArguments,
-    datasets.Dataset, datasets.Dataset, Trainer
-]:
+) -> Tuple[GPT2LMHeadModel, GPT2TokenizerFast, datasets.Dataset, datasets.Dataset, Trainer]:
     if model_name == 'debug-gpt-ori':  # Sanity check: As if keep training GPT-2, with padding for simplicity
         conf = AutoConfig.from_pretrained('gpt2')
         conf.update(dict(use_cache=False))
@@ -451,7 +423,8 @@ def get_all_setup(
 
     dset_tr_, dset_vl_ = get_dset(
         dataset_name=dataset_name, map_func=map_func, remove_columns=['label', 'text'],
-        n_sample=n_sample, random_seed=random_seed, fast='debug' not in model_name
+        n_sample=n_sample, random_seed=random_seed,
+        fast='debug' not in model_name
     )
     trainer_args = dict(
         model=model_, args=train_args_, data_collator=data_collator_,
@@ -461,7 +434,7 @@ def get_all_setup(
         tokenizer=tokenizer_, custom_logging=custom_logging, compute_cls_acc=model_name != 'debug-gpt-ori',
         **trainer_args
     )
-    return model_, tokenizer_, data_collator_, train_args_, dset_tr_, dset_vl_, trainer_
+    return model_, tokenizer_, dset_tr_, dset_vl_, trainer_
 
 
 class TrainPlot:
@@ -1083,17 +1056,18 @@ if __name__ == '__main__':
 
     # nm = 'debug'
     # nm = 'debug-gpt-ori'
-    # nm = 'debug-large'
-    nm = 'gpt2'
+    nm = 'debug-large'
+    # nm = 'gpt2'
     # nm = 'gpt2-medium'
+    n = 256
 
     # n = 1
     # n = 1024
-    # n = 256
-    n = None
-    md, tkzer, data_collator, tr_args, dset_tr, dset_vl, trainer = get_all_setup(
+    # n = None
+    md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(
         nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
+    ic(tkzer.pad_token_id)
     trainer.train()
     trainer.save_model(os.path.join(trainer.args.output_dir))
     trainer.evaluate()
