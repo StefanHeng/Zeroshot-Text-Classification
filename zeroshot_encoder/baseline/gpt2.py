@@ -1056,7 +1056,7 @@ if __name__ == '__main__':
     # n = 1
     n = 1024
     # n = None
-    md, tkzer, dset_tr, dset_vl; , trainer = get_all_setup(
+    md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(
         nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed
     )
     ic(trainer.args)
