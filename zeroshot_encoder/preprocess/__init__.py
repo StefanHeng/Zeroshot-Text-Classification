@@ -1,7 +1,5 @@
-from typing import List, Tuple
-from typing import Union, Callable
+from typing import Callable
 
-import datasets
 from datasets import load_dataset
 
 
@@ -14,7 +12,11 @@ def get_dset(
         n_sample: int = None, random_seed: int = None, fast=True
 ) -> Tuple[datasets.Dataset, ...]:
     if dataset_name == 'benchmark_joined':
-        dset = datasets.load_from_disk(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined'))
+        if 'clarity' in get_hostname():
+            out_base = os.path.join('/data')
+        else:
+            out_base = PATH_BASE
+        dset = datasets.load_from_disk(os.path.join(out_base, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined'))
     else:
         dset = load_dataset(dataset_name)
     tr, vl = dset['train'], dset['test']
