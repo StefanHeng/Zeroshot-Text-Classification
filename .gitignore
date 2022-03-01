@@ -7,6 +7,7 @@ dataset_obsolete/
 models/
 test_lang*
 examples/
+chore/
 
 
 # Byte-compiled / optimized / DLL files
