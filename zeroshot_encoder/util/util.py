@@ -85,8 +85,8 @@ def config(attr):
     if not hasattr(config, 'config'):
         with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'r') as f:
             config.config = json.load(f)
-    config.config['benchmark']['dataset_id2name'] = {  # Convert str keys to int
-        int(k): v for k, v in config.config['benchmark']['dataset_id2name'].items()
+    config.config['UTCD']['dataset_id2name'] = {  # Convert str keys to int
+        int(k): v for k, v in config.config['UTCD']['dataset_id2name'].items()
     }
     return get(config.config, attr)
 
@@ -328,18 +328,20 @@ def get_output_base():
         return PATH_BASE
 
 
-def process_benchmark_dataset(join=False):
-    ext = config('benchmark.dataset_ext')
-    path_dset = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET)
+def process_utcd_dataset(join=False):
+    ext = config('UTCD.dataset_ext')
+    path_dsets = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
+    path_out = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET)
 
     def path2dsets(dnm: str, d_dset: Dict) -> Union[datasets.DatasetDict, Dict[str, pd.DataFrame]]:
         path = d_dset['path']
-        path = os.path.join(path_dset, f'{path}.{ext}')
+        path = os.path.join(path_dsets, f'{path}.{ext}')
         with open(path) as f:
             dsets_: Dict = json.load(f)
-        d_lbs = config(f'benchmark.datasets.{dnm}.labels')
+        d_lbs = config(f'UTCD.datasets.{dnm}.labels')
 
         def json2dset(split: str, dset: List) -> Union[datasets.Dataset, pd.DataFrame]:
+            assert all(sample[0] != '' for sample in dset)
             dset = [dict(text=txt, label=lb) for (txt, lb) in dset]  # Heuristic on how the `json` are stored
             df_ = pd.DataFrame(dset)
             if join:  # Leave processing labels til later
@@ -354,9 +356,9 @@ def process_benchmark_dataset(join=False):
                 df_.label.replace(to_replace=lbs.names, value=range(lbs.num_classes), inplace=True)
                 return datasets.Dataset.from_pandas(df_, features=features_)
         return datasets.DatasetDict({split: json2dset(split, dset) for split, dset in dsets_.items()})
-    d_dsets = {dnm: path2dsets(dnm, d) for dnm, d in config('benchmark.datasets').items()}
+    d_dsets = {dnm: path2dsets(dnm, d) for dnm, d in config('UTCD.datasets').items()}
     if join:
-        dnm2id = config('benchmark.dataset_name2id')
+        dnm2id = config('UTCD.dataset_name2id')
 
         def pre_concat(dnm: str, df_: pd.DataFrame) -> pd.DataFrame:
             df_['dataset_id'] = [dnm2id[dnm]] * len(df_)  # Add dataset source information to each row
@@ -380,16 +382,16 @@ def process_benchmark_dataset(join=False):
         tr = dfs2dset(pre_concat(dnm, dsets['train']) for dnm, dsets in d_dsets.items())
         vl = dfs2dset(pre_concat(dnm, dsets['test']) for dnm, dsets in d_dsets.items())
         dsets = datasets.DatasetDict(train=tr, test=vl)
-        dsets.save_to_disk(os.path.join(path_dset, 'processed', 'benchmark_joined'))
+        dsets.save_to_disk(os.path.join(path_out, 'processed', 'UTCD'))
     else:
         for dnm, dsets in d_dsets.items():
-            dsets.save_to_disk(os.path.join(path_dset, 'processed', dnm))
+            dsets.save_to_disk(os.path.join(path_out, 'processed', dnm))
 
 
 def map_ag_news():
     dnm = 'ag_news'
-    d_dset = config(f'benchmark.datasets.{dnm}')
-    ext = config('benchmark.dataset_ext')
+    d_dset = config(f'UTCD.datasets.{dnm}')
+    ext = config('UTCD.dataset_ext')
     path_dset = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
     path = d_dset['path']
     path = os.path.join(path_dset, f'{path}.{ext}')
@@ -409,12 +411,12 @@ if __name__ == '__main__':
 
     # ic(fmt_num(124439808))
 
-    # process_benchmark_dataset()
-    process_benchmark_dataset(join=True)
+    # process_utcd_dataset()
+    process_utcd_dataset(join=True)
 
     def sanity_check():
         dset = datasets.load_from_disk(
-            os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'processed', 'benchmark_joined')
+            os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', 'UTCD')
         )['test']
         lbs = dset.features['label']
         ic(lbs)
