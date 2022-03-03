@@ -105,3 +105,36 @@ if __name__ == '__main__':
         for dnm_ in config('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
+
+    def plot_approaches_performance(save=False):
+        strategy = 'rand'
+        model_names = ['binary-bert', 'bert-nli']
+        fig, axes = plt.subplots(1, 3, figsize=(16, 6))
+        cs = sns.color_palette(palette='husl', n_colors=len(model_names))
+
+        for ax, (aspect, dnms) in zip(axes, D_DNMS.items()):
+            for i_color, md_nm in enumerate(model_names):
+                scores = [
+                    s['f1-score']
+                    for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strategy))
+                ]
+                dnm_ints = list(range(len(dnms)))
+                ax.plot(
+                    dnm_ints, scores, c=cs[i_color], lw=1, ms=16, marker='.',
+                    label=md_nm_n_strat2str_out(md_nm, strategy, pprint=True)
+                )
+                ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
+            ax.set_title(f'{aspect} split')
+        scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
+        ma, mi = scores.max(), scores.min()
+        ma, mi = round(ma, 1), round(mi, 1)-0.1
+        for ax in axes:
+            ax.set_ylim([mi, ma])
+        title = 'In domain evaluation f1 scores'
+        plt.suptitle(title)
+        plt.legend()
+        if save:
+            plt.savefig(os.path.join(path_base, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
+        else:
+            plt.show()
+    plot_approaches_performance(save=True)
