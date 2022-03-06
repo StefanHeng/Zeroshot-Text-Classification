@@ -78,6 +78,7 @@
             "clinc_150": {
                 "path": "clinc_150",
                 "aspect": "intent",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "accept reservations",
@@ -388,6 +389,7 @@
             "sgd": {
                 "path": "sgd",
                 "aspect": "intent",
+                "eval_labels_same": false,
                 "labels": {
                     "train": [
                         "Add Event",
@@ -468,6 +470,7 @@
             "slurp": {
                 "path": "slurp",
                 "aspect": "intent",
+                "eval_labels_same": false,
                 "labels": {
                     "train": [
                         "add contact",
@@ -644,6 +647,7 @@
             "emotion": {
                 "path": "emotion",
                 "aspect": "sentiment",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "anger",
@@ -666,6 +670,7 @@
             "go_emotion": {
                 "path": "go_emotion",
                 "aspect": "sentiment",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "admiration sentiment",
@@ -732,6 +737,7 @@
             "sentiment_tweets_2020": {
                 "path": "sentiment_tweets_2020",
                 "aspect": "sentiment",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "negative sentiment",
@@ -748,6 +754,7 @@
             "ag_news": {
                 "path": "ag_news",
                 "aspect": "topic",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "Business",
@@ -766,6 +773,7 @@
             "dbpedia": {
                 "path": "dbpedia",
                 "aspect": "topic",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "Album",
@@ -804,6 +812,7 @@
             "yahoo": {
                 "path": "yahoo",
                 "aspect": "topic",
+                "eval_labels_same": true,
                 "labels": {
                     "train": [
                         "Business & Finance",
