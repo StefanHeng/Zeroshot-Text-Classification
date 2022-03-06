@@ -3,37 +3,34 @@ from typing import Callable
 from zeroshot_encoder.util import *
 
 
-path_base = os.path.join(PATH_BASE, DIR_PROJ, 'chore')
+PATH_BASE_CHORE = os.path.join(PATH_BASE, DIR_PROJ, 'chore')
 
 _CONFIG = {
     'model-name': {'binary-bert': 'Binary BERT', 'bert-nli': 'BERT-NLI'},
-    'sampling-strategy': {'rand': 'Random Negative Sampling'}
+    'sampling-strategy': dict(
+        rand='Random Negative Sampling', vect='Word2Vec Average Extremes'
+    )
 }
 
 D_DNMS = OrderedDict([
     ('emotion', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
-    ('indent', ['sgd', 'clinc_150', 'slurp']),
+    ('intent', ['sgd', 'clinc_150', 'slurp']),
     ('topic', ['ag_news', 'dbpedia', 'yahoo'])
 ])
 DNMS = sum(D_DNMS.values(), start=[])
 
 
 def get_dnm2csv_path_fn(model_name: str, strategy: str) -> Callable:
-    if strategy == 'rand':  # Radnom negative sampling
-        if model_name == 'binary-bert':
-            return (
-                lambda d_nm:
-                os.path.join(path_base, 'csvs', 'binary-bert-random-negative-sampling', f'binary_bert_rand_{d_nm}.csv')
-            )
-        elif model_name == 'bert-nli':
-            return (
-                lambda d_nm:
-                os.path.join(path_base, 'csvs', 'bert-nli-random-negative-sampling', f'nli_bert_{d_nm}.csv')
-            )
-        else:
-            raise ValueError('unexpected model name')
+    paths = [PATH_BASE, DIR_PROJ, 'evaluations']
+    if model_name == 'binary-bert':
+        paths.append('binary_bert')
+    elif model_name == 'bert-nli':
+        paths.append('nli_bert')
     else:
-        return lambda d_nm: os.path.join(path_base, 'csvs', 'default', f'binary_bert_{d_nm}.csv')
+        raise ValueError('unexpected model name')
+    assert strategy in ['rand', 'vect']  # # Radnom negative sampling; word2vec average label selection
+    paths.append(strategy)
+    return lambda d_nm: os.path.join(*paths, 'results', f'{d_nm}.csv')
 
 
 def md_nm_n_strat2str_out(model_name: str, strategy: str, pprint=False) -> Tuple[str, str]:

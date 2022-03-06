@@ -93,35 +93,37 @@ if __name__ == '__main__':
             'twilight_shifted'
         ]
         for cm in cmaps:
-            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os.path.join(path_base, 'plot'))
+            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os.path.join(PATH_BASE_CHORE, 'plot'))
 
     # plot_class_heatmap(dnm, save=False, dir_save=os.path.join(path_base, 'plot'))
 
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
         md_nm, strat = md_nm_n_strat2str_out(model_name, strategy)
-        dir_save = os.path.join(path_base, 'plot', f'{now(sep="-")}, {md_nm} with {strat}')
+        dir_save = os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in config('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
     def plot_approaches_performance(save=False):
-        strategy = 'rand'
-        model_names = ['binary-bert', 'bert-nli']
-        fig, axes = plt.subplots(1, 3, figsize=(16, 6))
-        cs = sns.color_palette(palette='husl', n_colors=len(model_names))
+        setups = [('binary-bert', 'rand'), ('binary-bert', 'vect'), ('bert-nli', 'rand'), ('bert-nli', 'vect')]
+        fig, axes = plt.subplots(1, (len(D_DNMS)), figsize=(16, 6))
+        n_color = len(setups)
+        cs = sns.color_palette(palette='husl', n_colors=n_color)
 
         for ax, (aspect, dnms) in zip(axes, D_DNMS.items()):
-            for i_color, md_nm in enumerate(model_names):
+            for i_color, (md_nm, strat) in enumerate(setups):
+                # if md_nm == 'bert-nli':  # Uses half the color; TODO: intended for 2 classes
+                #     i_color += 2*n_color//3
                 scores = [
                     s['f1-score']
-                    for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strategy))
+                    for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat))
                 ]
                 dnm_ints = list(range(len(dnms)))
                 ax.plot(
                     dnm_ints, scores, c=cs[i_color], lw=1, ms=16, marker='.',
-                    label=md_nm_n_strat2str_out(md_nm, strategy, pprint=True)
+                    label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
                 ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
@@ -130,11 +132,11 @@ if __name__ == '__main__':
         ma, mi = round(ma, 1), round(mi, 1)-0.1
         for ax in axes:
             ax.set_ylim([mi, ma])
-        title = 'In domain evaluation f1 scores'
+        title = 'Clasisifcation Accuracy - In-domain evaluation'
         plt.suptitle(title)
-        plt.legend()
+        plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         if save:
-            plt.savefig(os.path.join(path_base, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
+            plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
         else:
             plt.show()
-    plot_approaches_performance(save=True)
+    plot_approaches_performance(save=False)

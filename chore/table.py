@@ -4,9 +4,12 @@ from typing import Callable
 from zeroshot_encoder.util import *
 
 
-def summaries2table_row(summaries: List[Dict], exp='latex') -> Union[str, List[str]]:
+def summaries2table_row(summaries: List[Dict], exp='latex', acc_only: bool = True) -> Union[str, List[str]]:
     def out_single(d: Dict) -> str:
-        return '/'.join(f'{d[k]*100:4.1f}' for k in ('precision', 'recall', 'f1-score'))
+        if acc_only:
+            return f'{d["f1-score"]*100:4.1f}'
+        else:
+            return '/'.join(f'{d[k]*100:4.1f}' for k in ('precision', 'recall', 'f1-score'))
     if exp == 'latex':
         return ' & '.join(f'${out_single(d)}$' for d in summaries)
     elif exp == 'csv':
@@ -42,18 +45,22 @@ if __name__ == '__main__':
         for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand')]:
             summaries = dataset_acc_summary(DNMS, dnm2csv_path=get_dnm2csv_path_fn(model_name, strategy))
             print(summaries2table_row(summaries))
-    get_latex_table_row()
+    # get_latex_table_row()
 
-    def get_csv(dataset_names):
-        with open(os.path.join(path_base, 'table', 'in-domain evaluation.csv'), 'w') as f:
+    def get_csv(dataset_names: Iterable[str]):
+        with open(os.path.join(
+                PATH_BASE_CHORE, 'table', f'in-domain classification accuracy, {now(sep="-")}.csv'
+        ), 'w') as f:
             writer = csv.writer(f)
 
             writer.writerow([''] * 2 + sum(([aspect] * 3 for aspect in ('emotion', 'intent', 'topic')), start=[]))
             writer.writerow(['model', 'sampling strategy'] + DNMS)
 
-            for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand')]:
+            for model_name, strategy in [
+                ('binary-bert', 'rand'), ('binary-bert', 'vect'), ('bert-nli', 'rand'), ('bert-nli', 'vect')
+            ]:
                 fn = get_dnm2csv_path_fn(model_name, strategy)
                 summaries = dataset_acc_summary(dataset_names, dnm2csv_path=fn)
                 model_name, strategy = md_nm_n_strat2str_out(model_name, strategy)
                 writer.writerow([model_name, strategy] + summaries2table_row(summaries, exp='csv'))
-    # get_csv(dnms)
+    get_csv(DNMS)
