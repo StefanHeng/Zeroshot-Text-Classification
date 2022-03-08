@@ -56,9 +56,12 @@ if __name__ == '__main__':
             writer.writerow([''] * 2 + sum(([aspect] * 3 for aspect in ('emotion', 'intent', 'topic')), start=[]))
             writer.writerow(['model', 'sampling strategy'] + DNMS)
 
-            for model_name, strategy in [
-                ('binary-bert', 'rand'), ('binary-bert', 'vect'), ('bert-nli', 'rand'), ('bert-nli', 'vect')
-            ]:
+            setups = [
+                ('binary-bert', 'rand'), ('binary-bert', 'vect'),
+                ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+                ('bi-encoder', 'rand'), ('bi-encoder', 'vect')
+            ]
+            for model_name, strategy in setups:
                 fn = get_dnm2csv_path_fn(model_name, strategy)
                 summaries = dataset_acc_summary(dataset_names, dnm2csv_path=fn)
                 model_name, strategy = md_nm_n_strat2str_out(model_name, strategy)

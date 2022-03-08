@@ -9,15 +9,15 @@
 Python version `3.9.7`.
 
 ```bash
-$ pip3 install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 
 ### Train Baseline 
 e.g. On GPT2 zero shot classification: 
 ```bash
-$ export PYTHONPATH=$PATHONPATH:`pwd`
-$ python zeroshot_encoder/baseline/gpt2.py
+export PYTHONPATH=$PATHONPATH:`pwd`
+python3 zeroshot_encoder/baseline/gpt2.py
 ```
 
 

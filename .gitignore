@@ -10,6 +10,7 @@ examples/
 chore/*/
 evaluations/
 pretrained-models/
+trained-models/
 
 
 # Byte-compiled / optimized / DLL files

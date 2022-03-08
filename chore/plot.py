@@ -107,36 +107,48 @@ if __name__ == '__main__':
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
     def plot_approaches_performance(save=False):
-        setups = [('binary-bert', 'rand'), ('binary-bert', 'vect'), ('bert-nli', 'rand'), ('bert-nli', 'vect')]
+        setups = [
+            ('binary-bert', 'rand'), ('binary-bert', 'vect'),
+            ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+            ('bi-encoder', 'rand'), ('bi-encoder', 'vect')
+        ]
         fig, axes = plt.subplots(1, (len(D_DNMS)), figsize=(16, 6))
-        n_color = len(setups)
+        models = list(set(md for md, strat in setups))
+        n_color = len(models)
         cs = sns.color_palette(palette='husl', n_colors=n_color)
 
         for ax, (aspect, dnms) in zip(axes, D_DNMS.items()):
-            for i_color, (md_nm, strat) in enumerate(setups):
-                # if md_nm == 'bert-nli':  # Uses half the color; TODO: intended for 2 classes
-                #     i_color += 2*n_color//3
+            for md_nm, strat in setups:
                 scores = [
-                    s['f1-score']
+                    s['f1-score'] * 100  # As percentage
                     for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat))
                 ]
                 dnm_ints = list(range(len(dnms)))
+                line_style = '-' if strat == 'rand' else ':'
+                i_color = models.index(md_nm)
                 ax.plot(
-                    dnm_ints, scores, c=cs[i_color], lw=1, ms=16, marker='.',
+                    dnm_ints, scores, c=cs[i_color], ls=line_style, lw=1, marker='.', ms=8,
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
                 ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
+        edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
         ma, mi = scores.max(), scores.min()
-        ma, mi = round(ma, 1), round(mi, 1)-0.1
-        for ax in axes:
+        ma, mi = round(ma, -1), max(round(mi, -1)-10, 0)
+        for ax, edges_ in zip(axes, edges):
             ax.set_ylim([mi, ma])
+            ma_, mi_ = float(edges_.max()), float(edges_.min())
+            assert ma_.is_integer() and mi_.is_integer()
+            ax.set_xlim([mi_-0.25, ma_+0.25])
         title = 'Clasisifcation Accuracy - In-domain evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
-        if save:
+        fig.supylabel('Classification Accuracy (%)')
+        fig.supxlabel('Dataset')
+        if save:  # TODO: distance between dsets
             plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
         else:
             plt.show()
+    # plot_approaches_performance(save=True)
     plot_approaches_performance(save=False)

@@ -6,7 +6,11 @@ from zeroshot_encoder.util import *
 PATH_BASE_CHORE = os.path.join(PATH_BASE, DIR_PROJ, 'chore')
 
 _CONFIG = {
-    'model-name': {'binary-bert': 'Binary BERT', 'bert-nli': 'BERT-NLI'},
+    'model-name': {
+        'binary-bert': 'Binary BERT',
+        'bert-nli': 'BERT-NLI',
+        'bi-encoder': 'Bi-encoder'
+    },
     'sampling-strategy': dict(
         rand='Random Negative Sampling', vect='Word2Vec Average Extremes'
     )
@@ -26,6 +30,8 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str) -> Callable:
         paths.append('binary_bert')
     elif model_name == 'bert-nli':
         paths.append('nli_bert')
+    elif model_name == 'bi-encoder':
+        paths.append('bi-encoder')
     else:
         raise ValueError('unexpected model name')
     assert strategy in ['rand', 'vect']  # # Radnom negative sampling; word2vec average label selection
@@ -44,7 +50,7 @@ def dataset_acc_summary(dataset_names: Iterable[str], dnm2csv_path: Callable = N
         df.rename(columns={'Unnamed: 0': 'class'}, inplace=True)  # Per csv files
         df = df.iloc[-3:, :].reset_index(drop=True)
         df.support = df.support.astype(int)
-        row_acc = df.iloc[0, :]
+        row_acc = df.iloc[0, :]  # The accuracy row
         return OrderedDict([
             ('dnm', d_nm), ('aspect', config(f'UTCD.datasets.{d_nm}.aspect')),
             ('precision', row_acc.precision), ('recall', row_acc.recall), ('f1-score', row_acc['f1-score'])
