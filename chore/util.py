@@ -25,8 +25,8 @@ D_DNMS = {
     ]),
     'out-of-domain': OrderedDict([
         ('sentiment', ['amazon_polarity', 'finance_sentiment', 'yelp']),
-        ('intent', ['arxiv', 'patent', 'consumer_finance']),  # TODO: 'arxiv' removed, add another?
-        ('topic', ['banking77', 'snips', 'nlu_evaluation'])
+        ('intent', ['banking77', 'snips', 'nlu_evaluation']),  # TODO: 'arxiv' removed, add another?
+        ('topic', ['arxiv', 'patent', 'consumer_finance'])
     ])
 }
 DNMS_IN = sum(D_DNMS['in-domain'].values(), start=[])

@@ -1227,6 +1227,60 @@
                     ]
                 }
             },
+            "multi_eurlex": {
+                "path": "UTCD-ood/multi_eurlex",
+                "aspect": "topic",
+                "eval_labels_same": true,
+                "out_of_domain": true,
+                "labels": {
+                    "train": [
+                        "EUROPEAN UNION",
+                        "agri-foodstuffs",
+                        "agriculture, forestry and fisheries",
+                        "business and competition",
+                        "economics",
+                        "education and communications",
+                        "employment and working conditions",
+                        "energy",
+                        "environment",
+                        "finance",
+                        "geography",
+                        "industry",
+                        "international organisations",
+                        "international relations",
+                        "law",
+                        "politics",
+                        "production, technology and research",
+                        "science",
+                        "social questions",
+                        "trade",
+                        "transport"
+                    ],
+                    "test": [
+                        "EUROPEAN UNION",
+                        "agri-foodstuffs",
+                        "agriculture, forestry and fisheries",
+                        "business and competition",
+                        "economics",
+                        "education and communications",
+                        "employment and working conditions",
+                        "energy",
+                        "environment",
+                        "finance",
+                        "geography",
+                        "industry",
+                        "international organisations",
+                        "international relations",
+                        "law",
+                        "politics",
+                        "production, technology and research",
+                        "science",
+                        "social questions",
+                        "trade",
+                        "transport"
+                    ]
+                }
+            },
             "patent": {
                 "path": "UTCD-ood/patent",
                 "aspect": "topic",
@@ -1658,14 +1712,15 @@
             "emotion": 7,
             "finance_sentiment": 8,
             "go_emotion": 9,
-            "nlu_evaluation": 10,
-            "patent": 11,
-            "sentiment_tweets_2020": 12,
-            "sgd": 13,
-            "slurp": 14,
-            "snips": 15,
-            "yahoo": 16,
-            "yelp": 17
+            "multi_eurlex": 10,
+            "nlu_evaluation": 11,
+            "patent": 12,
+            "sentiment_tweets_2020": 13,
+            "sgd": 14,
+            "slurp": 15,
+            "snips": 16,
+            "yahoo": 17,
+            "yelp": 18
         },
         "dataset_id2name": {
             "0": "ag_news",
@@ -1678,14 +1733,15 @@
             "7": "emotion",
             "8": "finance_sentiment",
             "9": "go_emotion",
-            "10": "nlu_evaluation",
-            "11": "patent",
-            "12": "sentiment_tweets_2020",
-            "13": "sgd",
-            "14": "slurp",
-            "15": "snips",
-            "16": "yahoo",
-            "17": "yelp"
+            "10": "multi_eurlex",
+            "11": "nlu_evaluation",
+            "12": "patent",
+            "13": "sentiment_tweets_2020",
+            "14": "sgd",
+            "15": "slurp",
+            "16": "snips",
+            "17": "yahoo",
+            "18": "yelp"
         }
     },
     "random-seed": 77

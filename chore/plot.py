@@ -116,16 +116,21 @@ if __name__ == '__main__':
 
         for ax, (aspect, dnms) in zip(axes, d_dnms.items()):
             for md_nm, strat in setups:
-                if md_nm == 'gpt2-nvidia':
-                    dnms = [dnm for dnm in dnms if dnm != 'arxiv']  # TODO: not computed for GPT2, will be removed later
+                dnms_ = dnms
+                if aspect == 'topic':
+                    if md_nm == 'gpt2-nvidia':
+                        # TODO: not computed for GPT2, will be removed later
+                        dnms_ = [dnm for dnm in dnms if dnm != 'arxiv']
+                    if md_nm == 'bi-encoder':
+                        dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage
                     for s in dataset_acc_summary(
-                        dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, in_domain=in_domain)
+                        dataset_names=dnms_, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, in_domain=in_domain)
                     )
                 ]
-                dnm_ints = list(range(len(dnms)))
-                if md_nm == 'gpt2-nvidia' and aspect == 'intent':  # TODO
+                dnm_ints = list(range(len(dnms_)))
+                if md_nm == 'gpt2-nvidia' and aspect == 'topic':  # TODO
                     dnm_ints = [i+1 for i in dnm_ints]
                 line_style = '-' if strat in ['rand', 'NA'] else ':'
                 i_color = models.index(md_nm)
@@ -133,8 +138,11 @@ if __name__ == '__main__':
                     dnm_ints, scores, c=cs[i_color], ls=line_style, lw=1, marker='.', ms=8,
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
-                if md_nm != 'gpt2-nvidia':  # TODO: cos tick missing
-                    ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
+            dnm_ints = list(range(len(dnms)))
+            if aspect == 'topic':
+                ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
+            else:
+                ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
@@ -155,7 +163,6 @@ if __name__ == '__main__':
         else:
             plt.show()
 
-
     setups_in = [
         ('binary-bert', 'rand'), ('binary-bert', 'vect'),
         ('bert-nli', 'rand'), ('bert-nli', 'vect'),
@@ -167,7 +174,9 @@ if __name__ == '__main__':
 
     setups_out = [
         ('binary-bert', 'rand'),
-        ('bert-nli', 'rand'),
+        ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+        ('bi-encoder', 'rand'),
         ('gpt2-nvidia', 'NA'),
     ]
+    # plot_approaches_performance(setups_out, in_domain=False, save=False)
     plot_approaches_performance(setups_out, in_domain=False, save=True)
