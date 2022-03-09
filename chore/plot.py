@@ -106,42 +106,46 @@ if __name__ == '__main__':
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
-    def plot_approaches_performance(save=False):
-        setups = [
-            ('binary-bert', 'rand'), ('binary-bert', 'vect'),
-            ('bert-nli', 'rand'), ('bert-nli', 'vect'),
-            ('bi-encoder', 'rand'), ('bi-encoder', 'vect')
-        ]
-        fig, axes = plt.subplots(1, (len(D_DNMS)), figsize=(16, 6))
+    def plot_approaches_performance(setups: List[Tuple[str, str]], in_domain=True, save=False):
+        domain = 'in-domain' if in_domain else 'out-of-domain'
+        d_dnms = D_DNMS[domain]
+        fig, axes = plt.subplots(1, (len(d_dnms)), figsize=(16, 6))
         models = list(set(md for md, strat in setups))
-        n_color = len(models)
+        n_color = len(models)+1
         cs = sns.color_palette(palette='husl', n_colors=n_color)
 
-        for ax, (aspect, dnms) in zip(axes, D_DNMS.items()):
+        for ax, (aspect, dnms) in zip(axes, d_dnms.items()):
             for md_nm, strat in setups:
+                if md_nm == 'gpt2-nvidia':
+                    dnms = [dnm for dnm in dnms if dnm != 'arxiv']  # TODO: not computed for GPT2, will be removed later
                 scores = [
                     s['f1-score'] * 100  # As percentage
-                    for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat))
+                    for s in dataset_acc_summary(
+                        dataset_names=dnms, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, in_domain=in_domain)
+                    )
                 ]
                 dnm_ints = list(range(len(dnms)))
-                line_style = '-' if strat == 'rand' else ':'
+                if md_nm == 'gpt2-nvidia' and aspect == 'intent':  # TODO
+                    dnm_ints = [i+1 for i in dnm_ints]
+                line_style = '-' if strat in ['rand', 'NA'] else ':'
                 i_color = models.index(md_nm)
                 ax.plot(
                     dnm_ints, scores, c=cs[i_color], ls=line_style, lw=1, marker='.', ms=8,
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
-                ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
+                if md_nm != 'gpt2-nvidia':  # TODO: cos tick missing
+                    ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
         ma, mi = scores.max(), scores.min()
-        ma, mi = round(ma, -1), max(round(mi, -1)-10, 0)
+        ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, 0)
         for ax, edges_ in zip(axes, edges):
             ax.set_ylim([mi, ma])
             ma_, mi_ = float(edges_.max()), float(edges_.min())
             assert ma_.is_integer() and mi_.is_integer()
             ax.set_xlim([mi_-0.25, ma_+0.25])
-        title = 'Clasisifcation Accuracy - In-domain evaluation'
+        title = f'Clasisifcation Accuracy - {domain} evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
@@ -150,5 +154,20 @@ if __name__ == '__main__':
             plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
         else:
             plt.show()
+
+
+    setups_in = [
+        ('binary-bert', 'rand'), ('binary-bert', 'vect'),
+        ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+        ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
+        ('gpt2-nvidia', 'NA')
+    ]
     # plot_approaches_performance(save=True)
-    plot_approaches_performance(save=False)
+    # plot_approaches_performance(setups_in, in_domain=True, save=False)
+
+    setups_out = [
+        ('binary-bert', 'rand'),
+        ('bert-nli', 'rand'),
+        ('gpt2-nvidia', 'NA'),
+    ]
+    plot_approaches_performance(setups_out, in_domain=False, save=True)

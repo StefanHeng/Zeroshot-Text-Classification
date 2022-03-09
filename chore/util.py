@@ -9,39 +9,56 @@ _CONFIG = {
     'model-name': {
         'binary-bert': 'Binary BERT',
         'bert-nli': 'BERT-NLI',
-        'bi-encoder': 'Bi-encoder'
+        'bi-encoder': 'Bi-encoder',
+        'gpt2-nvidia': 'GPT2-NVIDIA'
     },
     'sampling-strategy': dict(
-        rand='Random Negative Sampling', vect='Word2Vec Average Extremes'
+        rand='Random Negative Sampling', vect='Word2Vec Average Extremes', NA='-',  # not applicable
     )
 }
 
-D_DNMS = OrderedDict([
-    ('emotion', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
-    ('intent', ['sgd', 'clinc_150', 'slurp']),
-    ('topic', ['ag_news', 'dbpedia', 'yahoo'])
-])
-DNMS = sum(D_DNMS.values(), start=[])
+D_DNMS = {
+    'in-domain': OrderedDict([
+        ('sentiment', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
+        ('intent', ['sgd', 'clinc_150', 'slurp']),
+        ('topic', ['ag_news', 'dbpedia', 'yahoo'])
+    ]),
+    'out-of-domain': OrderedDict([
+        ('sentiment', ['amazon_polarity', 'finance_sentiment', 'yelp']),
+        ('intent', ['arxiv', 'patent', 'consumer_finance']),  # TODO: 'arxiv' removed, add another?
+        ('topic', ['banking77', 'snips', 'nlu_evaluation'])
+    ])
+}
+DNMS_IN = sum(D_DNMS['in-domain'].values(), start=[])
+DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 
 
-def get_dnm2csv_path_fn(model_name: str, strategy: str) -> Callable:
+def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Callable:
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
-    if model_name == 'binary-bert':
-        paths.append('binary_bert')
-    elif model_name == 'bert-nli':
+    assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'gpt2-nvidia']
+    if model_name == 'bert-nli':
         paths.append('nli_bert')
-    elif model_name == 'bi-encoder':
-        paths.append('bi-encoder')
+    elif model_name == 'binary-bert':
+        paths.append('binary_bert')
     else:
-        raise ValueError('unexpected model name')
-    assert strategy in ['rand', 'vect']  # # Radnom negative sampling; word2vec average label selection
-    paths.append(strategy)
-    return lambda d_nm: os.path.join(*paths, 'results', f'{d_nm}.csv')
+        paths.append(model_name)
+    assert strategy in ['rand', 'vect', 'NA']  # # Radnom negative sampling; word2vec average label selection
+
+    if strategy == 'NA':  # GPT2
+        assert model_name == 'gpt2-nvidia'
+        paths.extend(['in-domain', '2022-03-09 00-08-18'] if in_domain else ['out-of-domain', '2022-03-09 04-21-11'])
+    else:  # BERT models
+        paths.extend([strategy, 'results'])
+        paths.append('in-domain' if in_domain else 'out-of-domain')
+    return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 
-def md_nm_n_strat2str_out(model_name: str, strategy: str, pprint=False) -> Tuple[str, str]:
+def md_nm_n_strat2str_out(model_name: str, strategy: str, pprint=False) -> Union[Tuple[str, str], str]:
     md_nm, strat = _CONFIG['model-name'][model_name], _CONFIG['sampling-strategy'][strategy]
-    return f'{md_nm} with {strat}' if pprint else (md_nm, strat)
+    if pprint:
+        return f'{md_nm} with {strat}' if strat != '-' else md_nm
+    else:
+        return md_nm, strat
 
 
 def dataset_acc_summary(dataset_names: Iterable[str], dnm2csv_path: Callable = None) -> List[Dict]:

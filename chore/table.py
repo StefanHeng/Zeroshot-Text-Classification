@@ -42,10 +42,10 @@ if __name__ == '__main__':
     # quick_table(config('UTCD.datasets'))
 
     def get_latex_table_row():
-        for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand')]:
-            summaries = dataset_acc_summary(DNMS, dnm2csv_path=get_dnm2csv_path_fn(model_name, strategy))
-            print(summaries2table_row(summaries))
-    # get_latex_table_row()
+        for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand'), ('gpt2-nvidia', 'NA')]:
+            summaries = dataset_acc_summary(DNMS_IN, dnm2csv_path=get_dnm2csv_path_fn(model_name, strategy))
+            print(summaries2table_row(summaries, exp='csv'))
+    get_latex_table_row()
 
     def get_csv(dataset_names: Iterable[str]):
         with open(os.path.join(
@@ -54,16 +54,17 @@ if __name__ == '__main__':
             writer = csv.writer(f)
 
             writer.writerow([''] * 2 + sum(([aspect] * 3 for aspect in ('emotion', 'intent', 'topic')), start=[]))
-            writer.writerow(['model', 'sampling strategy'] + DNMS)
+            writer.writerow(['model', 'sampling strategy'] + DNMS_IN)
 
             setups = [
                 ('binary-bert', 'rand'), ('binary-bert', 'vect'),
                 ('bert-nli', 'rand'), ('bert-nli', 'vect'),
-                ('bi-encoder', 'rand'), ('bi-encoder', 'vect')
+                ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
+                ('gpt2-nvidia', 'NA')
             ]
             for model_name, strategy in setups:
                 fn = get_dnm2csv_path_fn(model_name, strategy)
                 summaries = dataset_acc_summary(dataset_names, dnm2csv_path=fn)
                 model_name, strategy = md_nm_n_strat2str_out(model_name, strategy)
                 writer.writerow([model_name, strategy] + summaries2table_row(summaries, exp='csv'))
-    get_csv(DNMS)
+    # get_csv(DNMS)
