@@ -46,7 +46,7 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
 
     if strategy == 'NA':  # GPT2
         assert model_name == 'gpt2-nvidia'
-        paths.extend(['in-domain', '2022-03-09 00-08-18'] if in_domain else ['out-of-domain', '2022-03-09 04-21-11'])
+        paths.extend(['in-domain', '2022-03-09 00-08-18'] if in_domain else ['out-of-domain', '2022-03-09 17-26-05'])
     else:  # BERT models
         paths.extend([strategy, 'results'])
         paths.append('in-domain' if in_domain else 'out-of-domain')
@@ -73,4 +73,3 @@ def dataset_acc_summary(dataset_names: Iterable[str], dnm2csv_path: Callable = N
             ('precision', row_acc.precision), ('recall', row_acc.recall), ('f1-score', row_acc['f1-score'])
         ])
     return [get_single(d) for d in dataset_names]
-

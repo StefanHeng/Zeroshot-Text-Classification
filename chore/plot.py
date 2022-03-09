@@ -118,10 +118,8 @@ if __name__ == '__main__':
             for md_nm, strat in setups:
                 dnms_ = dnms
                 if aspect == 'topic':
-                    if md_nm == 'gpt2-nvidia':
-                        # TODO: not computed for GPT2, will be removed later
-                        dnms_ = [dnm for dnm in dnms if dnm != 'arxiv']
-                    if md_nm == 'bi-encoder':
+                    # TODO: some models had eval number for the new datasets alraedy, swap only those for now
+                    if md_nm in ['bi-encoder', 'gpt2-nvidia']:
                         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage
@@ -130,8 +128,6 @@ if __name__ == '__main__':
                     )
                 ]
                 dnm_ints = list(range(len(dnms_)))
-                if md_nm == 'gpt2-nvidia' and aspect == 'topic':  # TODO
-                    dnm_ints = [i+1 for i in dnm_ints]
                 line_style = '-' if strat in ['rand', 'NA'] else ':'
                 i_color = models.index(md_nm)
                 ax.plot(
@@ -139,7 +135,7 @@ if __name__ == '__main__':
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
             dnm_ints = list(range(len(dnms)))
-            if aspect == 'topic':
+            if aspect == 'topic':  # TODO: remove
                 ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
             else:
                 ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
@@ -147,7 +143,7 @@ if __name__ == '__main__':
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
         ma, mi = scores.max(), scores.min()
-        ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, 0)
+        ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
         for ax, edges_ in zip(axes, edges):
             ax.set_ylim([mi, ma])
             ma_, mi_ = float(edges_.max()), float(edges_.min())

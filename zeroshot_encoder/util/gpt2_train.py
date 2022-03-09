@@ -224,7 +224,7 @@ class MyLoggingCallback(TrainerCallback):
             self.logger.info(log_dict(d_stats) if isinstance(d_stats, dict) else d_stats)
             self.logger_fl.info(log_dict(d_stats, with_color=False) if isinstance(d_stats, dict) else d_stats)
 
-        if state.is_local_process_zero:
+        if self.trainer.is_local_process_zero():  # `state.is_local_process_zero` is wrong in DDP eval
             if self.trainer.mode == 'train':  # cos `evaluate` may be called during training
                 step = state.global_step
                 if self.do_eval:
@@ -430,6 +430,12 @@ def get_accs(
             # By default, the predictions and labels will not agree
             d_lbs_ = dict(label_id_pred=-1, label_id_true=descs.index(desc_true))  # Local label wrt dataset
             desc_pred = tokenizer.decode(preds[i_sample, idxs_answ])
+            # from icecream import ic
+            # lbs__ = labels_[i_sample]
+            # lbs__ = lbs__[lbs__ != PT_LOSS_PAD]
+            # if i_sample == 0:
+            #     ic(tokenizer.decode(lbs__)[:1500])
+            # ic(desc_true, desc_pred)
             if desc_pred in descs:
                 d_lbs_['label_id_pred'] = descs.index(desc_pred)
             return d_lbs_
@@ -441,6 +447,9 @@ def get_accs(
         n_total = len(ids_true)
         assert n_total == len(labels_)  # Number of samples with complete label
         d_ret['classification_acc_meta'] = dict(n_acc=n_acc, n_total=n_total, ids_pred=ids_pred, ids_true=ids_true)
+        # from icecream import ic
+        # ic(d_ret)
+        # exit(1)
     return d_ret
 
 
@@ -530,10 +539,6 @@ class CustomTrainer(Trainer):
     #     self._memory_tracker.stop_and_update_metrics(output.metrics)
     #
     #     return output.metrics
-
-    # def my_evaluate(self):
-    #     """ Instead of Trainer API """
-    #     self.mode = 'eval'
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -663,10 +668,12 @@ class CustomTrainer(Trainer):
             # instead of potentially concatenating the original evaluation matrix of shape (#eval, #model size, #vocab)
             # shape now is (#eval) cos for classification
             d_acc = get_accs(inputs, logits, self.tokenizer, mode=self.mode, compute_cls_acc=self.compute_cls_acc)
+            # For DDP; TODO: What's the proper way to cast?
+            args = dict(dtype=labels.dtype, device=labels.device)
             return (
                 loss,
-                torch.Tensor(d_acc['classification_acc_meta']['ids_pred']),
-                torch.Tensor(d_acc['classification_acc_meta']['ids_true']),
+                torch.tensor(d_acc['classification_acc_meta']['ids_pred'], **args),
+                torch.tensor(d_acc['classification_acc_meta']['ids_true'], **args),
                 inputs['dataset_id'].detach()
             )
         else:
@@ -877,8 +884,11 @@ class CustomTrainer(Trainer):
         # Metrics!
         if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
             # ========================== Begin of modified =========================
-            mep = MyEvalPrediction(predictions=all_preds, label_ids=all_labels, dataset_ids=all_dataset_ids)
-            metrics = self.compute_metrics(mep)
+            if self.is_local_process_zero():
+                mep = MyEvalPrediction(predictions=all_preds, label_ids=all_labels, dataset_ids=all_dataset_ids)
+                metrics = self.compute_metrics(mep)
+            else:
+                metrics = {}  # TODO: HF edge case???? Should compute metrics in main process only
             # ========================== End of modified =========================
         else:
             metrics = {}

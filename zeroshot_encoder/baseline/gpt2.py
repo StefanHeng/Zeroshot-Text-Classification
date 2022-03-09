@@ -98,7 +98,10 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         assert len(id_) == 1
         return id_[0]  # Intended for special tokens
 
-    def __call__(self, samples: Dict[str, Union[List, str, int]], is_utcd=False, mode: str = 'train', **kwargs):
+    def __call__(
+            self, samples: Dict[str, Union[List, str, int]],
+            dataset_name: str = 'UTCD', mode: str = 'train', **kwargs
+    ):
         """
         :param samples: Data sample(s) with keys [`dataset_name`, `label`, `text`]
             Each value an element or a list of elements
@@ -114,15 +117,15 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
         def call_single(i, dataset_id: int, text: str, label: int):
             dset_nm = config('UTCD.dataset_id2name')[dataset_id]
-            if is_utcd:
+            if 'UTCD' in dataset_name:
                 split = 'train' if mode == 'train' else 'test'
                 descs = config(f'UTCD.datasets.{dset_nm}.labels.{split}')  # Descriptive labels
                 n_cls = len(descs)
                 # `label` is shared across all datasets, map to local label within dataset
                 if self.cache_bm is None:
                     self.cache_bm = datasets.load_from_disk(
-                        os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', 'UTCD')
-                    )['train'].features['label']  # TODO: assume `train` split
+                        os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', dataset_name)
+                    )[split].features['label']  # TODO: assume `train` split
                 # The ordering indicates int<=>str label mapping, i.e., index is int label,
                 # see `process_utcd_dataset`
 
@@ -153,8 +156,8 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 # Crop the text portion, keep question and label intact, i.e., ensure no classification label is cropped
                 ln_t_ = self.max_len_single_sentence - (ln_q + ln_a)
                 assert ln_t_ > 0
-                warn(f'Sample longer than model max sequence length: {ln_total+6} > {self.model_max_length}'
-                     f' - Text portion cropped: {ln_t} > {ln_t_}')
+                warn(f'Sample longer than model max sequence length for dataset {dset_nm}: '
+                     f'{ln_total+6} > {self.model_max_length} - Text portion cropped: {ln_t} > {ln_t_}')
                 ids_text = ids_text[:ln_t_]
             # Number of contex tokens, up until answer token, inclusive
             n_ques, n_text, n_answ = (1 + len(ids_ques) + 1), (1 + len(ids_text) + 1), (1 + len(ids_answ) + 1)
@@ -285,10 +288,10 @@ def tokenize_func(tokenizer_: ZsGPT2Tokenizer, dataset_name='ag_news', max_lengt
         """
         :param sample: A batch of data samples
         """
-        if dataset_name != 'UTCD':
+        if 'UTCD' not in dataset_name:
             sample['dataset_id'] = [config('UTCD.dataset_name2id')[dataset_name]] * len(sample['label'])
         # Otherwise, `dataset_id` already part of input
-        return tokenizer_(sample, is_utcd=dataset_name == 'UTCD', max_length=max_length, mode=mode)
+        return tokenizer_(sample, dataset_name=dataset_name, max_length=max_length, mode=mode)
     return _tokenize_func
 
 
@@ -357,7 +360,7 @@ def get_train_setup(
         'gpt2-medium': dict(
             learning_rate=4e-5,
             train_batch_size=16,
-            eval_batch_size=48,
+            eval_batch_size=40,
             gradient_accumulation_steps=8,  # To fit in memory; Effectively batch size 128 as in paper
             weight_decay=1e-2,
             num_train_epochs=10,
@@ -385,7 +388,7 @@ def get_train_setup(
         per_device_train_batch_size=bsz_tr,
         per_device_eval_batch_size=bsz_vl,
         gradient_accumulation_steps=gas,
-        eval_accumulation_steps=16,  # Saves GPU memory
+        eval_accumulation_steps=128,  # Saves GPU memory
         # Adam's beta1, beta2, epsilon taken from the GPT2 config in
         # https://github.com/huggingface/transformers/blob/master/examples/pytorch/language-modeling/run_clm.py
         learning_rate=lr,
@@ -428,6 +431,9 @@ def compute_metrics(eval_pred: MyEvalPrediction):
     # Labels are per-sample already, see `CustomTrainer.prediction_step`
     preds, trues, dids = eval_pred.predictions, eval_pred.label_ids, eval_pred.dataset_ids
     id2dnm = config('UTCD.dataset_id2name')
+    path_dir = os.path.join(PATH_BASE, DIR_PROJ, 'evaluations', MODEL_NAME, now(sep='-'))
+    os.makedirs(path_dir, exist_ok=True)
+
     for did in np.unique(dids):
         dnm_ = id2dnm[did]
         # TODO: only evaluation split for now
@@ -436,13 +442,12 @@ def compute_metrics(eval_pred: MyEvalPrediction):
         preds_, trues_ = preds[msk_dset], trues[msk_dset]
         df = pd.DataFrame(
             # note `-1` is not actual label, support of 0 - included for full label specification per sklearn
+            # **note** cos the -1 label, the `macro avg` row is not accurate; included it for getting global accuracy
             classification_report(
                 trues_, preds_, labels=[-1, *id_label], target_names=['Label not in dataset', *desc_label],
                 output_dict=True
             )
         ).transpose()
-        path_dir = os.path.join(PATH_BASE, DIR_PROJ, 'evaluations', MODEL_NAME, now(sep='-'))
-        os.makedirs(path_dir, exist_ok=True)
         df.to_csv(os.path.join(path_dir, f'{dnm_}.csv'))
     return compute_metrics.metric.compute(predictions=preds, references=trues)
 
@@ -451,7 +456,7 @@ def get_all_setup(
         model_name, dataset_name: str = 'ag_news',
         n_sample=None, random_seed=None, do_eval=True, custom_logging=True,
         train_args: Dict = None
-) -> Tuple[GPT2LMHeadModel, GPT2TokenizerFast, datasets.Dataset, datasets.Dataset, Trainer]:
+) -> Tuple[GPT2LMHeadModel, Union[GPT2TokenizerFast, ZsGPT2Tokenizer], datasets.Dataset, datasets.Dataset, Trainer]:
     if model_name == 'debug-gpt-ori':  # Sanity check: As if keep training GPT-2, with padding for simplicity
         conf = AutoConfig.from_pretrained('gpt2')
         conf.update(dict(use_cache=False))
@@ -485,7 +490,8 @@ def get_all_setup(
         vl_map_func = tokenize_func(tokenizer_, dataset_name=dataset_name, mode='test')
 
     dset_tr_, dset_vl_ = get_dset(
-        dataset_name=dataset_name, tr_map_func=tr_map_func, vl_map_func=vl_map_func, remove_columns=['label', 'text'],
+        dataset_name=dataset_name,
+        d_map_func=dict(train=tr_map_func, test=vl_map_func), remove_columns=['label', 'text'],
         n_sample=n_sample, random_seed=random_seed,
         fast='debug' not in model_name
     )
@@ -517,12 +523,12 @@ if __name__ == '__main__':
     # nm = 'gpt2'
     nm = 'gpt2-medium'
 
-    # n = 1
+    n = 1
     # n = 128
     # n = 1024
     # n = 4500
     # n = 1024 * 32
-    n = None
+    # n = None
 
     tr_args = None
     # tr_args = dict(num_train_epochs=32)
@@ -553,22 +559,31 @@ if __name__ == '__main__':
         # trainer.evaluate()
     # train(resume=True)
 
+    def load_model2trainer(trainer_: Trainer, epoch: int = 3) -> Trainer:
+        """
+        With the Trainer API, Override the model
+        """
+        assert epoch in [2, 3]
+        if not hasattr(load_model2trainer, 'epoch2path'):
+            load_model2trainer.epoch2path = {
+                2: os.path.join(
+                    PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-37066'
+                ),
+                3: os.path.join(
+                    PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-55599'
+                )
+            }
+        checkpoint_path = load_model2trainer.epoch2path[epoch]
+        trainer_.model = ZsGPT2LMHeadModel.from_pretrained(checkpoint_path, is_zs_gpt2=True).to('cuda')  # with caching
+        return trainer_
+
     def evaluate_trained():
-        # With the Trainer.API
-        checkpoint_path = os.path.join(
-            PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-55599'
-        )
-        # Override the model
-        trainer.model = ZsGPT2LMHeadModel.from_pretrained(checkpoint_path, is_zs_gpt2=True).to('cuda')  # with caching
+        load_model2trainer(trainer, epoch=3)
         ic(trainer.evaluate())
-    evaluate_trained()
+    # evaluate_trained()
 
     def profile_evaluate():
-        checkpoint_path = os.path.join(
-            PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-37066'
-        )
-        # Override the model
-        trainer.model = ZsGPT2LMHeadModel.from_pretrained(checkpoint_path, is_zs_gpt2=True).to('cuda')  # with caching
+        load_model2trainer(trainer, epoch=2)
 
         import cProfile
         import pstats
@@ -581,3 +596,25 @@ if __name__ == '__main__':
         stats = pstats.Stats(profiler).sort_stats('cumtime')
         stats.print_stats()
     # profile_evaluate()
+
+    def evaluate_ood():
+        load_model2trainer(trainer, epoch=3)
+
+        dataset_name = 'UTCD-ood'
+        # n_ = 1024
+        # n_ = 1024 * 32
+        n_ = None
+
+        vl = get_dset(
+            dataset_name=dataset_name,
+            d_map_func=dict(test=tokenize_func(tkzer, dataset_name=dataset_name, mode='test')), splits='test',
+            # filter_func=lambda sample: sample['dataset_id'] != config('UTCD.dataset_name2id')['arxiv'],
+            # Run on newly-added dset only
+            filter_func=lambda sample: sample['dataset_id'] == config('UTCD.dataset_name2id')['multi_eurlex'],
+            remove_columns=['label', 'text'], n_sample=n_
+        )[0]
+        # TODO: remove arXiv for too long options
+        # gating with `if trainer.is_local_process_zero()`
+        # somehow causes `torchrun` to not terminate after 1st compute loss
+        ic(trainer.evaluate(eval_dataset=vl))
+    evaluate_ood()
