@@ -52,6 +52,14 @@ def join_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
     return out
 
 
+def lst2uniq_ids(lst: List[T]) -> List[int]:
+    """
+    Each unique element in list assigned an unique id
+    """
+    elm2id = {v: k for k, v in enumerate(OrderedDict.fromkeys(lst))}
+    return [elm2id[e] for e in lst]
+
+
 def get(dic, ks):
     """
     :param dic: Potentially multi-level dictionary
@@ -445,4 +453,6 @@ if __name__ == '__main__':
     def get_utcd_ood():
         process_utcd_dataset(ood=True, join=True)
         sanity_check('UTCD-ood')
-    get_utcd_ood()
+    # get_utcd_ood()
+
+    ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))

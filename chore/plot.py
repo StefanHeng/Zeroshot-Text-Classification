@@ -118,8 +118,8 @@ if __name__ == '__main__':
             for md_nm, strat in setups:
                 dnms_ = dnms
                 if aspect == 'topic':
-                    # TODO: some models had eval number for the new datasets alraedy, swap only those for now
-                    if md_nm in ['bi-encoder', 'gpt2-nvidia']:
+                    # TODO: some models had eval number for the new datasets already, swap only those for now
+                    if md_nm in ['bi-encoder', 'gpt2-nvidia'] or (md_nm == 'bert-nli' and strat == 'vect'):
                         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage

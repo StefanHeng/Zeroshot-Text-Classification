@@ -1,8 +1,26 @@
-from typing import List, Dict
+from typing import Tuple, List, Dict
+# from typing import TypeVar, Callable, Iterable
+# import concurrent.futures
 
 import json
 
 from data_path import *
+
+
+# T = TypeVar('T')
+# K = TypeVar('K')
+#
+#
+# def conc_map(fn: Callable[[T], K], it: Iterable[T]) -> Iterable[K]:
+#     """
+#     Wrapper for `concurrent.futures.map`
+#
+#     :param fn: A function
+#     :param it: A list of elements
+#     :return: Iterator of `lst` elements mapped by `fn` with concurrency
+#     """
+#     with concurrent.futures.ThreadPoolExecutor() as executor:
+#         return executor.map(fn, it)
 
 
 STSb = 'stsb_multi_mt'  # Per Hugging Face
@@ -102,8 +120,8 @@ config = {
                 path='UTCD-ood/finance_sentiment', aspect='sentiment', eval_labels_same=True, out_of_domain=True
             ),
             yelp=dict(path='UTCD-ood/yelp', aspect='sentiment', eval_labels_same=True, out_of_domain=True),
-            # Removed for too many options blow up GPT2's 1024 token length
-            # arxiv=dict(path='UTCD-ood/arxiv', aspect='topic', eval_labels_same=True, out_of_domain=True),
+            # Removed for too many options blow up GPT2's 1024 token length; TODO: remove, keep now cos plotting
+            arxiv=dict(path='UTCD-ood/arxiv', aspect='topic', eval_labels_same=True, out_of_domain=True),
             multi_eurlex=dict(path='UTCD-ood/multi_eurlex', aspect='topic', eval_labels_same=True, out_of_domain=True),
             patent=dict(path='UTCD-ood/patent', aspect='topic', eval_labels_same=True, out_of_domain=True),
             consumer_finance=dict(
@@ -124,31 +142,64 @@ path_dset = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
 ext = config['UTCD']['dataset_ext']
 
 
-def path2dataset_labels(path: str) -> Dict[str, List[str]]:
-    path = os.path.join(path_dset, f'{path}.{ext}')
+def path2dataset_info(d: Dict) -> Dict:
+    path = os.path.join(path_dset, f'{d["path"]}.{ext}')
     with open(path) as fl:
         dsets: Dict = json.load(fl)
 
-    def samples2lbs(dset: List) -> List[str]:
-        return sorted(set(lb for (txt, lb) in dset))  # Heuristic on how the `json` are stored
-    return {split: samples2lbs(dset) for split, dset in dsets.items()}  # Labels for each split
+    def split2info(dset: List[Tuple[str, str]]) -> Dict:
+        txts, lbs = zip(*dset)  # Heuristic on how the `json` are stored
+        txts_uniq, lbs_uniq = set(txts), set(lbs)
+        return dict(
+            n_label=len(lbs_uniq),
+            n_txt=len(txts_uniq),
+            n_sample=len(dset),
+            labels=sorted(lbs_uniq),
+            multi_label=len(txts_uniq) == len(dset)
+        )
+    d_out = {split: split2info(dset) for split, dset in dsets.items()}  # Labels for each split
+    if d['eval_labels_same']:
+        assert d_out['train']['labels'] == d_out['test']['labels']
+    return d_out
 
 
-d_dsets = config['UTCD']['datasets']
-for dnm, d in d_dsets.items():
-    d_labels = path2dataset_labels(d['path'])
-    if d['eval_labels_same']:  # Sanity check
-        assert d_labels['train'] == d_labels['test']
-    d.update(dict(labels=d_labels))
+d_dsets: Dict = config['UTCD']['datasets']
+# from icecream import ic
+# ic()
+for d_dset in d_dsets.values():
+    d_dset.update(dict(splits=path2dataset_info(d_dset)))
+# conc_map(lambda d_dset: d_dset.update(path2dataset_info(d_dset)), d_dsets.values())
+# ic()
+
 dnms = sorted(d_dsets)  # All datasets, in- and out-of-domain, share the same dataset <=> id mapping
 config['UTCD']['dataset_name2id'] = {dnm: i for i, dnm in enumerate(dnms)}
 config['UTCD']['dataset_id2name'] = {i: dnm for i, dnm in enumerate(dnms)}
 
 
 if __name__ == '__main__':
+    import pandas as pd
     from icecream import ic
+
+    pd.set_option('expand_frame_repr', False)
+    pd.set_option('max_colwidth', 40)
 
     fl_nm = 'config.json'
     ic(config)
+
+    # infos = []
+    # for dnm, d_dset in d_dsets.items():
+    #     for split, info in d_dsets.items():
+    #         infos.append([])
+    infos = sum((
+        [
+            (dict(dataset_name=dnm, split=split) | d_info)
+            for split, d_info in d_dset['splits'].items()
+        ]
+        for dnm, d_dset in d_dsets.items()
+    ), start=[])
+    ic(infos)
+    infos = pd.DataFrame(infos)
+    ic(infos)
+
     with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'w') as f:
         json.dump(config, f, indent=4)
