@@ -1,26 +1,8 @@
 from typing import Tuple, List, Dict
-# from typing import TypeVar, Callable, Iterable
-# import concurrent.futures
 
 import json
 
 from data_path import *
-
-
-# T = TypeVar('T')
-# K = TypeVar('K')
-#
-#
-# def conc_map(fn: Callable[[T], K], it: Iterable[T]) -> Iterable[K]:
-#     """
-#     Wrapper for `concurrent.futures.map`
-#
-#     :param fn: A function
-#     :param it: A list of elements
-#     :return: Iterator of `lst` elements mapped by `fn` with concurrency
-#     """
-#     with concurrent.futures.ThreadPoolExecutor() as executor:
-#         return executor.map(fn, it)
 
 
 STSb = 'stsb_multi_mt'  # Per Hugging Face
@@ -100,15 +82,15 @@ config = {
     'UTCD': dict(
         datasets=dict(
             # in-domain evaluation has the same labels as training
-            clinc_150=dict(path='UTCD/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
-            # has some unique test labels
-            sgd=dict(path='UTCD/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            slurp=dict(path='UTCD/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
             emotion=dict(path='UTCD/emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
             go_emotion=dict(path='UTCD/go_emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
             sentiment_tweets_2020=dict(
                 path='UTCD/sentiment_tweets_2020', aspect='sentiment', eval_labels_same=True, out_of_domain=False
             ),
+            clinc_150=dict(path='UTCD/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
+            # has some unique test labels
+            sgd=dict(path='UTCD/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            slurp=dict(path='UTCD/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
             ag_news=dict(path='UTCD/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
             dbpedia=dict(path='UTCD/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
             yahoo=dict(path='UTCD/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
@@ -151,25 +133,22 @@ def path2dataset_info(d: Dict) -> Dict:
         txts, lbs = zip(*dset)  # Heuristic on how the `json` are stored
         txts_uniq, lbs_uniq = set(txts), set(lbs)
         return dict(
+            labels=sorted(lbs_uniq),
             n_label=len(lbs_uniq),
             n_txt=len(txts_uniq),
             n_sample=len(dset),
-            labels=sorted(lbs_uniq),
-            multi_label=len(txts_uniq) == len(dset)
+            multi_label=len(txts_uniq) < len(dset)
         )
     d_out = {split: split2info(dset) for split, dset in dsets.items()}  # Labels for each split
+    assert all(split in ['train', 'test'] for split in d_out.keys())
     if d['eval_labels_same']:
         assert d_out['train']['labels'] == d_out['test']['labels']
     return d_out
 
 
 d_dsets: Dict = config['UTCD']['datasets']
-# from icecream import ic
-# ic()
 for d_dset in d_dsets.values():
     d_dset.update(dict(splits=path2dataset_info(d_dset)))
-# conc_map(lambda d_dset: d_dset.update(path2dataset_info(d_dset)), d_dsets.values())
-# ic()
 
 dnms = sorted(d_dsets)  # All datasets, in- and out-of-domain, share the same dataset <=> id mapping
 config['UTCD']['dataset_name2id'] = {dnm: i for i, dnm in enumerate(dnms)}
@@ -181,25 +160,18 @@ if __name__ == '__main__':
     from icecream import ic
 
     pd.set_option('expand_frame_repr', False)
-    pd.set_option('max_colwidth', 40)
+    pd.set_option('max_colwidth', 50)
 
     fl_nm = 'config.json'
     ic(config)
 
-    # infos = []
-    # for dnm, d_dset in d_dsets.items():
-    #     for split, info in d_dsets.items():
-    #         infos.append([])
-    infos = sum((
-        [
-            (dict(dataset_name=dnm, split=split) | d_info)
-            for split, d_info in d_dset['splits'].items()
-        ]
-        for dnm, d_dset in d_dsets.items()
-    ), start=[])
-    ic(infos)
-    infos = pd.DataFrame(infos)
-    ic(infos)
+    # infos = [
+    #     dict(dataset_name=dnm, aspect=d_dset['aspect'], out_of_domain=d_dset['out_of_domain'])
+    #     | {f'{split}-{k}': v for split, d_info in d_dset['splits'].items() for k, v in d_info.items()}
+    #     # for split, d_info in d_dset['splits'].items()
+    #     for dnm, d_dset in d_dsets.items()
+    # ]
+    # infos = pd.DataFrame(infos)
 
     with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'w') as f:
         json.dump(config, f, indent=4)

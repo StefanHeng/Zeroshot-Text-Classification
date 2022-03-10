@@ -333,6 +333,18 @@ def plot_points(arr, **kwargs):
     plt.plot(arr[:, 0], arr[:, 1], **kwargs)
 
 
+def get_utcd_info() -> pd.DataFrame:
+    """
+    Metadata about each dataset in UTCD
+    """
+    infos = [
+        dict(dataset_name=dnm, aspect=d_dset['aspect'], out_of_domain=d_dset['out_of_domain'])
+        | {f'{split}-{k}': v for split, d_info in d_dset['splits'].items() for k, v in d_info.items()}
+        for dnm, d_dset in config('UTCD.datasets').items()
+    ]
+    return pd.DataFrame(infos)
+
+
 def get_output_base():
     # For remote machines, save heavy-duty data somewhere else to save `/home` disk space
     hnm = get_hostname()
@@ -455,4 +467,10 @@ if __name__ == '__main__':
         sanity_check('UTCD-ood')
     # get_utcd_ood()
 
-    ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
+    # ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
+
+    def output_utcd_info():
+        df = get_utcd_info()
+        ic(df)
+        df.to_csv(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'utcd-info.csv'))
+    output_utcd_info()
