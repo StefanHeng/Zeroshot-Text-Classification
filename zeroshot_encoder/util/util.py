@@ -467,6 +467,14 @@ if __name__ == '__main__':
         sanity_check('UTCD-ood')
     # get_utcd_ood()
 
+    process_utcd_dataset(ood=True, join=False)
+
+    def sanity_check_ln_eurlex():
+        path = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', 'multi_eurlex')
+        ic(path)
+        dset = datasets.load_from_disk(path)
+        ic(dset, len(dset))
+    sanity_check_ln_eurlex()
     # ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
 
     def output_utcd_info():
