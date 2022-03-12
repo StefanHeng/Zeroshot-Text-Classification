@@ -45,7 +45,6 @@ category_map = {
     "snips": "intent",
     "yelp": "sentiment",
 }
-print(category_map)  # TODO: remove
 
 def get_data(path):
     if not os.path.exists(path):

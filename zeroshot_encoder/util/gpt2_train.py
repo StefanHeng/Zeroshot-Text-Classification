@@ -386,6 +386,9 @@ def get_accs(
     :param mode: Determines which split the labels are from, one of [`train`, `eval`]
     :param compute_cls_acc: Whether to compute classification accuracy
     :return: NTP accuracy & sample classification accuracy metadata
+
+    .. note: Classification accuracy based on NTP task during training
+        **assumes** predicted token id at the same location of label id
     """
     preds = logits.argmax(dim=-1)
     labels_ = inputs['labels'].detach()
@@ -430,12 +433,6 @@ def get_accs(
             # By default, the predictions and labels will not agree
             d_lbs_ = dict(label_id_pred=-1, label_id_true=descs.index(desc_true))  # Local label wrt dataset
             desc_pred = tokenizer.decode(preds[i_sample, idxs_answ])
-            # from icecream import ic
-            # lbs__ = labels_[i_sample]
-            # lbs__ = lbs__[lbs__ != PT_LOSS_PAD]
-            # if i_sample == 0:
-            #     ic(tokenizer.decode(lbs__)[:1500])
-            # ic(desc_true, desc_pred)
             if desc_pred in descs:
                 d_lbs_['label_id_pred'] = descs.index(desc_pred)
             return d_lbs_
@@ -447,9 +444,6 @@ def get_accs(
         n_total = len(ids_true)
         assert n_total == len(labels_)  # Number of samples with complete label
         d_ret['classification_acc_meta'] = dict(n_acc=n_acc, n_total=n_total, ids_pred=ids_pred, ids_true=ids_true)
-        # from icecream import ic
-        # ic(d_ret)
-        # exit(1)
     return d_ret
 
 
@@ -487,58 +481,6 @@ class CustomTrainer(Trainer):
         if not self.is_in_train:
             self.mode = 'eval'
         return super().evaluate(**kwargs)
-
-    # def evaluate(
-    #         self,
-    #         eval_dataset: Optional[Dataset] = None,
-    #         ignore_keys: Optional[List[str]] = None,
-    #         metric_key_prefix: str = "eval",
-    # ) -> Dict[str, float]:
-    #     # ========================== Begin of added ==========================
-    #     self.mode = 'eval'
-    #     from icecream import ic  # TODO: debugging
-    #     ic(self.args)
-    #     # return super().evaluate(**kwargs)
-    #     # ========================== End of added ==========================
-    #     self._memory_tracker.start()
-    #
-    #     eval_dataloader = self.get_eval_dataloader(eval_dataset)
-    #     start_time = time.time()
-    #
-    #     eval_loop = self.prediction_loop if self.args.use_legacy_prediction_loop else self.evaluation_loop
-    #     output = eval_loop(
-    #         eval_dataloader,
-    #         description="Evaluation",
-    #         # No point gathering the predictions if there are no metrics, otherwise we defer to
-    #         # self.args.prediction_loss_only
-    #         prediction_loss_only=True if self.compute_metrics is None else None,
-    #         ignore_keys=ignore_keys,
-    #         metric_key_prefix=metric_key_prefix,
-    #     )
-    #
-    #     total_batch_size = self.args.eval_batch_size * self.args.world_size
-    #     output.metrics.update(
-    #         speed_metrics(
-    #             metric_key_prefix,
-    #             start_time,
-    #             num_samples=output.num_samples,
-    #             num_steps=math.ceil(output.num_samples / total_batch_size),
-    #         )
-    #     )
-    #
-    #     self.log(output.metrics)
-    #
-    #     if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
-    #         # tpu-comment: Logging debug metrics for PyTorch/XLA (compile, execute times, ops, etc.)
-    #         xm.master_print(met.metrics_report())
-    #
-    #     # ========================== Begin of modified ==========================
-    #     self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output_metrics=output.metrics)
-    #     # ========================== End of modified ==========================
-    #
-    #     self._memory_tracker.stop_and_update_metrics(output.metrics)
-    #
-    #     return output.metrics
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """

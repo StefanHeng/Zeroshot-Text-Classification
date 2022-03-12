@@ -114,8 +114,6 @@ if __name__ == "__main__":
         # get keys from data dict
         datasets = list(data.keys())
         datasets.remove("all")
-        print(datasets)
-        datasets = ['multi_eurlex']  # TODO: remove
 
         # load model
         model = CrossEncoder(args.model_path)

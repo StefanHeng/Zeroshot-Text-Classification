@@ -4,6 +4,7 @@ Implementation of NVIDIA-GPT2 approach.
 [Zero-shot Text Classification With Generative Language Models](https://arxiv.org/abs/1912.10165)
 """
 from warnings import warn
+from collections import defaultdict
 
 from torch import nn
 from sklearn.metrics import classification_report
@@ -15,7 +16,7 @@ from transformers import GPT2Model, GPT2LMHeadModel  # LMHead for CLM training
 from transformers import Trainer, TrainingArguments, SchedulerType
 from transformers import DataCollatorForLanguageModeling
 from transformers.training_args import OptimizerNames
-from datasets import load_metric, load_dataset
+from datasets import load_metric
 
 from zeroshot_encoder.util import *
 from zeroshot_encoder.preprocess import get_dset
@@ -41,25 +42,38 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         """
         Wrapper around caching dict, that loads metadata on corresponding dataset
         """
-        def __init__(self):
+        def __init__(self, tokenizer: 'ZsGPT2Tokenizer'):
             super().__init__()
+            self.tokenizer = tokenizer
+            self.tpl_grouped = re.compile(rf'^(?P<dataset_name>.?)-label-grouped$')
 
-        def __getitem__(self, dataset_name):
+        def __getitem__(self, key: Tuple[str, str]):
             """
+            :param key: 2-tuple of (dataset_name, split)
+
             Needed cos huggingface may load cached dataset, internal cache is gone
+
+            .. note:: works for local disk dataset only
             """
-            if dataset_name not in self:
-                feats = load_dataset(dataset_name, split='train').features['label']  # Pick a split arbitrarily
-                feat2feat_full = {
-                    'World': 'World News',
-                    'Sports': 'Sports',
-                    'Business': 'Business',
-                    'Sci/Tech': 'Science & Technology'
-                }
+            dataset_name, split = key
+            key = f'{dataset_name}-{split}'
+            if key not in self:
+                dset = datasets.load_from_disk(
+                    os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', dataset_name)
+                )[split]
+                # See `zeroshot_encoder.util.util.py::process_utcd_dataset`
+                is_multi_label = 'labels' in dset.features.keys()
+                feats = dset.features['labels' if is_multi_label else 'label']
                 n_cls = feats.num_classes
-                lb2feat_str: List[str] = [feat2feat_full[feats.names[i]] for i in range(n_cls)]  # Labels = range
-                self[dataset_name] = dict(n_classes=n_cls, label2feature_str=lb2feat_str)
-            return super().__getitem__(dataset_name)
+                if is_multi_label:
+                    dataset_name = self.tpl_grouped.match(dataset_name).group('dataset_name')
+                assert feats.names == config(f'UTCD.datasets.{dataset_name}.splits.{split}.labels')  # sanity check
+                label2description: Dict[int, str] = {i: desc for i, desc in enumerate(feats.names)}  # label is index
+                self[key] = dict(
+                    n_classes=n_cls, label2description=label2description,
+                    max_label_id_length=max(len(self.tokenizer._call_paren(lb)) for lb in feats.names)
+                )
+            return super().__getitem__(key)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -71,13 +85,13 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
         self.templates = config('baselines.gpt2-nvidia.templates')
         # Mapping from dataset name to label for non-UTCD cases
-        self.cache: Dict[str, Dict] = ZsGPT2Tokenizer.Cache()
+        self.cache: Dict[str, Dict] = ZsGPT2Tokenizer.Cache(self)
         self.cache_bm = None
 
-        self.ques_token, self.text_token, self.answ_token = (
+        self.boq_token, self.bot_token, self.boa_token = (  # begin of (question, text, answer) tokens
             ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('pref_ques', 'pref_text', 'pref_answ')
         )  # Special tokens
-        self.ques_type_token, self.text_type_token, self.answ_type_token = (
+        self.question_type_token, self.text_type_token, self.answer_type_token = (
             ZsGPT2Tokenizer.SPEC_TOKS[k] for k in ('type_ques', 'type_text', 'type_answ')
         )  # Type tokens
 
@@ -100,26 +114,31 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
     def __call__(
             self, samples: Dict[str, Union[List, str, int]],
-            dataset_name: str = 'UTCD', mode: str = 'train', **kwargs
+            dataset_name: str = 'UTCD', mode: str = 'train', for_prediction: bool = False,
+            **kwargs
     ):
         """
         :param samples: Data sample(s) with keys [`dataset_name`, `label`, `text`]
             Each value an element or a list of elements
+        :param for_prediction: If true, the answer part is not tokenized,
+            the text portion is truncated such that the label with largest # of ids may be generated;
+            the batch is not padded
+                i.e. Intended for prediction, see `evaluate_trained`
         """
         max_length = kwargs.get('max_length', None)
-        is_batched = isinstance(samples['label'], (tuple, list))
+        is_batched = isinstance(samples['text'], (tuple, list))
         if max_length is None:
             max_length = self.model_max_length
         n_token = self.model_max_length  # Indented number of token positions as in the actual architecture
 
-        ln = len(samples['label'])
+        ln = len(samples['text'])
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(i, dataset_id: int, text: str, label: int):
-            dset_nm = config('UTCD.dataset_id2name')[dataset_id]
+            dset_nm: str = config('UTCD.dataset_id2name')[dataset_id]
             if 'UTCD' in dataset_name:
                 split = 'train' if mode == 'train' else 'test'
-                descs = config(f'UTCD.datasets.{dset_nm}.labels.{split}')  # Descriptive labels
+                descs = config(f'UTCD.datasets.{dset_nm}.splits.{split}.labels')  # Descriptive labels
                 n_cls = len(descs)
                 # `label` is shared across all datasets, map to local label within dataset
                 if self.cache_bm is None:
@@ -136,11 +155,15 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     return descs[lb]
                 answer = self.cache_bm.int2str(label)
             else:
-                n_cls, label2feature_str = (self.cache[dset_nm][k] for k in ('n_classes', 'label2feature_str'))
+                self.cache: ZsGPT2Tokenizer.Cache
+                n_cls, label2description = (self.cache[dset_nm, mode][k] for k in ('n_classes', 'label2description'))
 
                 def lb_int2desc(lb: int) -> str:
-                    return label2feature_str[lb]
-                answer = label2feature_str[label]
+                    return label2description[lb]
+                if for_prediction:
+                    answer = ''  # indexing wouldn't work cos multi label; Will not be used anyway, see below
+                else:
+                    answer = label2description[label]
 
             idx_lbs = np.arange(n_cls)
             np.random.shuffle(idx_lbs)
@@ -151,25 +174,43 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ids_text = self._call_paren(text, **kwargs)
             ids_answ = self._call_paren(answer, **kwargs)
             ln_q, ln_t, ln_a = len(ids_ques), len(ids_text), len(ids_answ)
-            ln_total = ln_q + ln_t + ln_a
-            if ln_total > self.max_len_single_sentence:
-                # Crop the text portion, keep question and label intact, i.e., ensure no classification label is cropped
-                ln_t_ = self.max_len_single_sentence - (ln_q + ln_a)
-                assert ln_t_ > 0
-                warn(f'Sample longer than model max sequence length for dataset {dset_nm}: '
-                     f'{ln_total+6} > {self.model_max_length} - Text portion cropped: {ln_t} > {ln_t_}')
-                ids_text = ids_text[:ln_t_]
+
+            if for_prediction:
+                ln_cont = (1+ln_q+1) + (1+ln_t+1) + 1  # for `pref_answ`
+                max_label_id_length = self.cache[dset_nm, mode]['max_label_id_length']
+                # The maximum number of tokens that could fit for context/prompt
+                room = self.model_max_length-1 - max_label_id_length  # Also needs to generate `EOS`
+                if ln_cont > room:
+                    # Crop the text portion so that the longest label can be generated
+                    ln_t_ = room - ((1+ln_q+1) + (1+1) + 1)
+                    assert ln_t_ > 0
+                    warn(f'Sample without answer longer than model max sequence length and dataset {dset_nm} labels: '
+                         f'{ln_cont} > {self.model_max_length} - Text portion cropped: {ln_t} > {ln_t_} for inference')
+                    ids_text = ids_text[:ln_t_]
+            else:
+                ln_ids = ln_q + ln_t + ln_a
+                if ln_ids > self.max_len_single_sentence:
+                    # Crop the text portion, keep question and label intact,
+                    # i.e., ensure no classification label is cropped
+                    ln_t_ = self.max_len_single_sentence - (ln_q + ln_a)
+                    assert ln_t_ > 0
+                    warn(f'Sample with answer longer than model max sequence length for dataset {dset_nm}: '
+                         f'{ln_ids+6} > {self.model_max_length} - Text portion cropped: {ln_t} > {ln_t_} for training')
+                    ids_text = ids_text[:ln_t_]
             # Number of contex tokens, up until answer token, inclusive
-            n_ques, n_text, n_answ = (1 + len(ids_ques) + 1), (1 + len(ids_text) + 1), (1 + len(ids_answ) + 1)
+            n_ques, n_text, n_answ = (1+len(ids_ques)+1), (1+len(ids_text)+1), (1+len(ids_answ)+1)
             n_cont = n_ques + n_text + 1
             ids = [
-                self.enc_spec(self.ques_token), *ids_ques, self.enc_spec(self.eos_token),
-                self.enc_spec(self.text_token), *ids_text, self.enc_spec(self.eos_token),
-                self.enc_spec(self.answ_token), *ids_answ, self.enc_spec(self.eos_token)
+                self.enc_spec(self.boq_token), *ids_ques, self.enc_spec(self.eos_token),
+                self.enc_spec(self.bot_token), *ids_text, self.enc_spec(self.eos_token),
+                self.enc_spec(self.boa_token), *ids_answ, self.enc_spec(self.eos_token)
             ]
-            tids = [self.enc_spec(self.ques_type_token)] * n_ques + \
+            tids = [self.enc_spec(self.question_type_token)] * n_ques + \
                    [self.enc_spec(self.text_type_token)] * n_text + \
-                   [self.enc_spec(self.answ_type_token)] * n_answ
+                   [self.enc_spec(self.answer_type_token)] * n_answ
+            if for_prediction:
+                ids, tids = ids[:-(n_answ-1)], tids[:-(n_answ-1)]
+                assert len(ids) == (n_ques+n_text+1)  # sanity check
             msks = [1] * len(ids)  # Encode ids are attended for CLM
             # Context position ids, followed by output position ids
             # adding `n_token` offset for the modified positional embeddings, see `ZsGPT2Model`
@@ -189,18 +230,20 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     # `input_id`s set to `pad_token` will be ignored by `DataCollatorForLanguageModeling`
                     int_pad = self.enc_spec(self.pad_token)
                 return ints[:max_length] if len(ints) > max_length else (ints + [int_pad] * (max_length - len(ints)))
-            out = {k: pad(ints, k) for k, ints in ((
+            out = {k: (ints if for_prediction else pad(ints, k)) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
             out['dataset_id'] = dataset_id  # For computing zero-shot classification accuracy
             return out
+        # See `zeroshot_encoder.util.util.py::process_utcd_dataset`
+        k_label = 'label' if 'label' in samples else 'labels'
         if is_batched:
             ds = [call_single(i, d_id, txt, lb) for i, (d_id, txt, lb) in enumerate(zip(
-                *[samples[k] for k in ['dataset_id', 'text', 'label']]
+                *[samples[k] for k in ['dataset_id', 'text', k_label]]
             ))]
             return BatchEncoding({k: [d[k] for d in ds] for k in ds[0]})  # Stack all the ids
         else:
-            return BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_id', 'text', 'label']]))
+            return BatchEncoding(call_single(0, *[samples[k] for k in ['dataset_id', 'text', k_label]]))
 
 
 class ZsGPT2Model(GPT2Model):
@@ -215,14 +258,14 @@ class ZsGPT2Model(GPT2Model):
         self.wpe = nn.Embedding(config_.max_position_embeddings*2, self.embed_dim)
 
 
-def pprint_gpt2_input(d: Dict[str, torch.Tensor]):
+def pprint_gpt2_input(tokenizer: ZsGPT2Tokenizer, d: Dict[str, torch.Tensor]):
     """
     Prints to console the encoded ids, positional ids and type ids as sanity check
     """
     n_ct, n_dnm, n_wd = 3, 10, 13
     n_pad = n_ct + n_dnm + 3
     ids, pids, tids, dids = (d[k].detach() for k in ('input_ids', 'position_ids', 'token_type_ids', 'dataset_id'))
-    pad = tkzer.enc_spec(tkzer.pad_token)
+    pad = tokenizer.enc_spec(tokenizer.pad_token)
     id2name = config('UTCD.dataset_id2name')
 
     for i, (ids_, did, pids_, tids_) in enumerate(zip(ids, dids, pids, tids)):
@@ -230,7 +273,7 @@ def pprint_gpt2_input(d: Dict[str, torch.Tensor]):
         ids_, pids_, tids_ = ids_[msk], pids_[msk], tids_[msk]
         print(f'{i:>{n_ct}}: {id2name[did.item()]:>{n_dnm}}', end=' ')
         for id_ in ids_:
-            tok = tkzer.decode(id_)
+            tok = tokenizer.decode(id_)
             print(f'{tok:>{n_wd}}', end='')
         print()
 
@@ -240,7 +283,7 @@ def pprint_gpt2_input(d: Dict[str, torch.Tensor]):
         print()
         print(' ' * n_pad, end='')
         for tid in tids_:
-            print(f'{tkzer.decode(tid):>{n_wd}}', end='')
+            print(f'{tokenizer.decode(tid):>{n_wd}}', end='')
         print()
 
 
@@ -283,22 +326,26 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
             return md_
 
 
-def tokenize_func(tokenizer_: ZsGPT2Tokenizer, dataset_name='ag_news', max_length=None, mode: str = 'train'):
+def tokenize_func(
+        tokenizer_: ZsGPT2Tokenizer, dataset_name='ag_news', max_length=None,
+        mode: str = 'train', for_prediction: bool = False
+):
     def _tokenize_func(sample: Dict[str, List]):
         """
         :param sample: A batch of data samples
         """
         if 'UTCD' not in dataset_name:
-            sample['dataset_id'] = [config('UTCD.dataset_name2id')[dataset_name]] * len(sample['label'])
+            sample['dataset_id'] = [config('UTCD.dataset_name2id')[dataset_name]] * len(sample['text'])
         # Otherwise, `dataset_id` already part of input
-        return tokenizer_(sample, dataset_name=dataset_name, max_length=max_length, mode=mode)
+        return tokenizer_(
+            sample, dataset_name=dataset_name, max_length=max_length, mode=mode, for_prediction=for_prediction
+        )
     return _tokenize_func
 
 
 def get_model_n_tokenizer(model_name='gpt2', save_gpu_memory: bool = True) -> Tuple[
     ZsGPT2LMHeadModel, ZsGPT2Tokenizer, DataCollatorForLanguageModeling
 ]:
-
     pretrained_model_name = 'gpt2'
 
     if 'debug' in model_name:  # Try a smaller model for training sanity check
@@ -425,30 +472,14 @@ def get_train_setup(
 
 
 def compute_metrics(eval_pred: MyEvalPrediction):
+    """
+    Will be called on eval data only, **during training**
+    """
     # Intended to work with `CustomTrainer.prediction_step`
     if not hasattr(compute_metrics, 'metric'):
         compute_metrics.metric = load_metric('accuracy')
     # Labels are per-sample already, see `CustomTrainer.prediction_step`
     preds, trues, dids = eval_pred.predictions, eval_pred.label_ids, eval_pred.dataset_ids
-    id2dnm = config('UTCD.dataset_id2name')
-    path_dir = os.path.join(PATH_BASE, DIR_PROJ, 'evaluations', MODEL_NAME, now(sep='-'))
-    os.makedirs(path_dir, exist_ok=True)
-
-    for did in np.unique(dids):
-        dnm_ = id2dnm[did]
-        # TODO: only evaluation split for now
-        id_label, desc_label = zip(*enumerate(config(f'UTCD.datasets.{dnm_}.labels.test')))  # Label is index
-        msk_dset = (dids == did)
-        preds_, trues_ = preds[msk_dset], trues[msk_dset]
-        df = pd.DataFrame(
-            # note `-1` is not actual label, support of 0 - included for full label specification per sklearn
-            # **note** cos the -1 label, the `macro avg` row is not accurate; included it for getting global accuracy
-            classification_report(
-                trues_, preds_, labels=[-1, *id_label], target_names=['Label not in dataset', *desc_label],
-                output_dict=True
-            )
-        ).transpose()
-        df.to_csv(os.path.join(path_dir, f'{dnm_}.csv'))
     return compute_metrics.metric.compute(predictions=preds, references=trues)
 
 
@@ -506,6 +537,163 @@ def get_all_setup(
     return model_, tokenizer_, dset_tr_, dset_vl_, trainer_
 
 
+def load_trained(epoch: int = 3) -> ZsGPT2LMHeadModel:
+    assert epoch in [2, 3]
+    if not hasattr(load_trained, 'epoch2path'):
+        load_trained.epoch2path = {
+            2: os.path.join(
+                PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-37066'
+            ),
+            3: os.path.join(
+                PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-55599'
+            )
+        }
+    checkpoint_path = load_trained.epoch2path[epoch]
+    return ZsGPT2LMHeadModel.from_pretrained(checkpoint_path, is_zs_gpt2=True).to('cuda')  # with caching
+
+
+def evaluate_trained(in_domain: bool = True, batch_size: int = 48, n_ep: int = 3):
+    """
+    Run evaluation, on potentially multi-label datasets
+    """
+    model = load_trained(epoch=n_ep).to('cuda')
+    conf, model_cnm = model.config, model.__class__.__qualname__
+    # To disable warning `Setting `pad_token_id` to `eos_token_id` for open-end generation.`
+    model_size = conf.max_length = conf.n_ctx
+    conf.pad_token_id = conf.eos_token_id
+    model.eval()
+    tkzer = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=model_size)
+
+    split = 'test'
+    path_dir = os.path.join(PATH_BASE, DIR_PROJ, 'evaluations', MODEL_NAME, now(sep='-'))
+
+    dataset_names = [
+        dnm for dnm in config('UTCD.datasets').keys()
+        if (config(f'UTCD.datasets.{dnm}.out_of_domain') == (not in_domain))
+    ]
+    d_model = OrderedDict([('model name', model_cnm), ('trained #epoch', n_ep), ('model size', model_size)])
+    d_eval = OrderedDict([
+        ('max batch size', batch_size),
+        ('datasets', dataset_names)
+    ])
+    domain = 'in domain' if in_domain else 'out of domain'
+    logger_name = 'GPT2-NVIDIA Evaluation'
+    logger = get_logger(logger_name, typ='stdout')
+    logger_fl = get_logger(
+        f'{logger_name} file-write', typ='file-write',
+        file_path=os.path.join(path_dir, f'{logger_name}, bsz={batch_size}, {domain}.log')
+    )
+    logger.info(f'Running evaluation {logi(domain)} on model {log_dict(d_model)}, with {log_dict(d_eval)}... ')
+    logger_fl.info(f'Running evaluation {domain} on model {log_dict(d_model, with_color=False)}, '
+                   f'with {log_dict(d_eval, with_color=False)}... ')
+
+    for dnm_ in dataset_names:
+        d_info = config(f'UTCD.datasets.{dnm_}.splits.{split}')
+        is_multi_label = d_info['multi_label']
+        lb2id = defaultdict(lambda: -1)  # If generated invalid descriptive label, will return -1
+        labels = d_info['labels']
+        # predictions and label descriptions all to lower case to be more lenient
+        lb2id.update({lb.lower(): i for i, lb in enumerate(labels)})
+        dnm_disk = f'{dnm_}-label-grouped' if is_multi_label else dnm_
+        dset = get_dset(  # Get evaluation set only
+            dataset_name=dnm_disk, splits='test',
+            d_map_func=dict(test=tokenize_func(tkzer, dataset_name=dnm_, mode='test', for_prediction=True)),
+            remove_columns='text', n_sample=None, from_disk=True
+        )[0]
+
+        # Batched generation that **doesn't take up padding** is not supported by HuggingFace
+        n_dset = len(dset)
+        trues, preds = np.empty(n_dset, dtype=int), np.empty(n_dset, dtype=int)
+        len_ids = np.array([len(ids) for ids in dset[:]['input_ids']])
+        uniq_lens = np.unique(len_ids)
+        # Batches of likely different batch sizes
+        ln2idxs = [np.where(len_ids == ln)[0] for ln in uniq_lens]
+        idxs_batches = sum(  # Get batches of same length, with max batch size of `batch_size`
+            (np.split(idxs, range(batch_size, idxs.size, batch_size)) if idxs.size > batch_size else [idxs]
+             for idxs in ln2idxs),
+            start=[]
+        )
+        n_bch = len(idxs_batches)
+        logger.info(f'Running evaluation on dataset {logi(dnm_disk)}, with labels {log_dict(lb2id)}, '
+                    f'of {logi(len(dset))} unique texts in {logi(n_bch)} batches... ')
+        logger_fl.info(f'Running evaluation on dataset {dnm_disk}, with labels{lb2id}, '
+                       f'of {len(dset)} unique texts in {n_bch} batches... ')
+
+        n_computed = 0
+        for step, idxs in enumerate(idxs_batches):  # Each batch has input samples of the same token length
+            idxs = [int(idx) for idx in idxs]  # `Dataset.select` works with `int` indices only
+            inputs = {  # No need to pad; Don't need to the labels to complicate forward pass
+                k: torch.tensor(v, device='cuda') for k, v in dset[idxs].items() if k not in ['label', 'labels']
+            }
+            outputs = model.generate(**inputs)  # Greedy decoding
+            outputs = tkzer.batch_decode(outputs, skip_special_tokens=False)
+            n_computed += len(idxs)
+
+            def set_pred_n_true(generated: str, i_sample: int) -> Tuple[int, int]:
+                idxs_boa = get_substr_indices(s=generated, s_sub=tkzer.boa_token)
+                # there will be at least one index, as in prompt
+                answer_with_eos = generated[idxs_boa[0] + len(tkzer.boa_token):]
+                id_pred = -1
+                if len(idxs_boa) > 1:
+                    logger.warning(f'{logi(model_cnm)} generated {logi(len(idxs_boa))} boa_token '
+                                   f'instead of {logi(1)} with {logi(answer_with_eos)}')
+                    logger_fl.warning(f'{model_cnm} generated {len(idxs_boa)} boa_token '
+                                      f'instead of {1} with {answer_with_eos}')
+                else:
+                    assert len(idxs_boa) == 1
+                    idxs_eot = get_substr_indices(s=answer_with_eos, s_sub=tkzer.eos_token)
+                    if not len(idxs_eot):  # No eos token generated
+                        logger.warning(f'{logi(model_cnm)} didn\'t finish generating answer '
+                                       f'with [{logi(answer_with_eos)}]')
+                        logger_fl.warning(f'{model_cnm} didn\'t finish generating answer with [{answer_with_eos}]')
+                    # GPT2 would generate multiple `eos_token` for the samples in the batch that terminates early
+                    else:
+                        answer = answer_with_eos[:idxs_eot[0]].lower()  # until the 1st eos
+                        id_pred = lb2id[answer]
+                if is_multi_label:
+                    lbs_true = dset[i_sample]['labels']
+                    if id_pred in lbs_true:
+                        # predicted label is one of the correct labels, pick that label so that prediction is correct
+                        id_true = next(lb_id for lb_id in lbs_true if lb_id == id_pred)
+                    else:
+                        # prediction incorrect, pick a single label arbitrarily
+                        # This renders class-level performance inaccurate; TODO?
+                        id_true = lbs_true[0]
+                else:
+                    id_true = dset[i_sample]['label']
+                preds[i_sample], trues[i_sample] = id_pred, id_true
+                return id_pred, id_true
+            preds_batch, trues_batch = zip(*[
+                set_pred_n_true(out, i_sample) for out, i_sample in zip(outputs, idxs)
+            ])
+            d_log = dict(
+                step=f'{step+1:>{len(str(n_bch))}}/{n_bch}', progress=f'{n_computed:>{len(str(n_dset))}}/{n_dset}',
+                sequence_length=len(inputs['input_ids'][0]),
+                batch_size=f'{len(idxs):>{len(str(batch_size))}}/{batch_size}',
+                n_acc=sum(p == t for p, t in zip(preds_batch, trues_batch)),
+                ids_pred=list(preds_batch), ids_true=list(trues_batch)
+            )
+            logger.info(log_dict(d_log, with_color=True))
+            logger_fl.info(log_dict(d_log, with_color=False))
+
+        def check_labels_filled(lbs):  # sanity check, every index is assigned a label
+            return np.all((-1 <= lbs) & (lbs < len(labels)))
+        assert check_labels_filled(trues) and check_labels_filled(preds)
+        df = pd.DataFrame(
+            # note `-1` is not actual label, support of 0 - included for full label specification per sklearn
+            # **note** cos the -1 label, the `macro avg` row is not accurate;
+            # included it for getting global accuracy
+            classification_report(
+                trues, preds, labels=[-1, *range(len(labels))], target_names=['Label not in dataset', *labels],
+                output_dict=True
+            )
+        ).transpose()
+        path = os.path.join(path_dir, f'{dnm_}.csv')
+        df.to_csv(path)
+        logger.info(f'Evaluation on {logi(dnm_disk)} written to CSV at {logi(path)}')
+        logger_fl.info(f'Evaluation on {dnm_disk} written to CSV at {path}')
+
+
 if __name__ == '__main__':
     from icecream import ic
 
@@ -514,107 +702,101 @@ if __name__ == '__main__':
     seed = config('random-seed')
     transformers.set_seed(seed)
 
-    # dnm = 'ag_news'
-    dnm = 'UTCD'
+    def train():
+        # dnm = 'ag_news'
+        dnm = 'UTCD'
 
-    # nm = 'debug'
-    # nm = 'debug-gpt-ori'
-    # nm = 'debug-large'
-    # nm = 'gpt2'
-    nm = 'gpt2-medium'
+        # nm = 'debug'
+        # nm = 'debug-gpt-ori'
+        # nm = 'debug-large'
+        # nm = 'gpt2'
+        nm = 'gpt2-medium'
 
-    n = 1
-    # n = 128
-    # n = 1024
-    # n = 4500
-    # n = 1024 * 32
-    # n = None
+        # n = 1
+        n = 128
+        # n = 1024
+        # n = 4500
+        # n = 1024 * 32
+        # n = None
 
-    tr_args = None
-    # tr_args = dict(num_train_epochs=32)
+        tr_args = None
+        # tr_args = dict(num_train_epochs=32)
 
-    md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(
-        nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed, train_args=tr_args
-    )
+        md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(
+            nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed, train_args=tr_args
+        )
+        # TODO:
+        eval_dataloader = trainer.get_eval_dataloader()
+        # for step, inputs in enumerate(eval_dataloader):
+        #     ic(inputs.keys())
+        #     ic(inputs['input_ids'].device)
+        #     exit(1)
+        trainer.evaluate()
+        exit(1)
 
-    def profile_train():
-        import cProfile
-        import pstats
-        profiler = cProfile.Profile()
-        profiler.enable()
-        trainer.train()
-        profiler.disable()
-        stats = pstats.Stats(profiler).sort_stats('cumtime')
-        stats.print_stats()
-    # profile_train()
-
-    def train(resume=False):
-        if resume:
-            checkpoint_path = '/scratch/profmars_root/profmars0/stefanhg/Zero-shot-text-classification/' \
-                              'models/gpt2/gpt2-medium/2022-03-03 00-23-41/checkpoint-18533'
-            trainer.train(checkpoint_path)  # Resume from checkpoint
-        else:
+        def profile_train():
+            import cProfile
+            import pstats
+            profiler = cProfile.Profile()
+            profiler.enable()
             trainer.train()
-        trainer.save_model(os.path.join(trainer.args.output_dir))
-        # trainer.evaluate()
-    # train(resume=True)
+            profiler.disable()
+            stats = pstats.Stats(profiler).sort_stats('cumtime')
+            stats.print_stats()
+        # profile_train()
 
-    def load_model2trainer(trainer_: Trainer, epoch: int = 3) -> Trainer:
-        """
-        With the Trainer API, Override the model
-        """
-        assert epoch in [2, 3]
-        if not hasattr(load_model2trainer, 'epoch2path'):
-            load_model2trainer.epoch2path = {
-                2: os.path.join(
-                    PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-37066'
-                ),
-                3: os.path.join(
-                    PATH_BASE, DIR_PROJ, 'trained-models', 'gpt2-nvidia', '2022-03-04 21-33-12', 'checkpoint-55599'
-                )
-            }
-        checkpoint_path = load_model2trainer.epoch2path[epoch]
-        trainer_.model = ZsGPT2LMHeadModel.from_pretrained(checkpoint_path, is_zs_gpt2=True).to('cuda')  # with caching
-        return trainer_
+        def train(resume=False):
+            if resume:
+                checkpoint_path = '/scratch/profmars_root/profmars0/stefanhg/Zero-shot-text-classification/' \
+                                  'models/gpt2/gpt2-medium/2022-03-03 00-23-41/checkpoint-18533'
+                trainer.train(checkpoint_path)  # Resume from checkpoint
+            else:
+                trainer.train()
+            trainer.save_model(os.path.join(trainer.args.output_dir))
+            # trainer.evaluate()
+        # train(resume=True)
 
-    def evaluate_trained():
-        load_model2trainer(trainer, epoch=3)
-        ic(trainer.evaluate())
-    # evaluate_trained()
+        def evaluate_trained():
+            trainer.model = load_trained(epoch=3)  # Override the model
+            ic(trainer.evaluate())
+        # evaluate_trained()
 
-    def profile_evaluate():
-        load_model2trainer(trainer, epoch=2)
+        def profile_evaluate():
+            trainer.model = load_trained(epoch=2)
 
-        import cProfile
-        import pstats
-        profiler = cProfile.Profile()
-        profiler.enable()
+            import cProfile
+            import pstats
+            profiler = cProfile.Profile()
+            profiler.enable()
 
-        ic(trainer.evaluate())
+            ic(trainer.evaluate())
 
-        profiler.disable()
-        stats = pstats.Stats(profiler).sort_stats('cumtime')
-        stats.print_stats()
-    # profile_evaluate()
+            profiler.disable()
+            stats = pstats.Stats(profiler).sort_stats('cumtime')
+            stats.print_stats()
+        # profile_evaluate()
 
-    def evaluate_ood():
-        load_model2trainer(trainer, epoch=3)
+        def evaluate_ood():
+            trainer.model = load_trained(epoch=2)
 
-        dataset_name = 'UTCD-ood'
-        # n_ = 1024
-        # n_ = 1024 * 32
-        n_ = None
+            dataset_name = 'UTCD-ood'
+            # n_ = 1024
+            # n_ = 1024 * 32
+            n_ = None
 
-        vl = get_dset(
-            dataset_name=dataset_name,
-            d_map_func=dict(test=tokenize_func(tkzer, dataset_name=dataset_name, mode='test')), splits='test',
-            # filter_func=lambda sample: sample['dataset_id'] != config('UTCD.dataset_name2id')['arxiv'],
-            # Run on newly-added dset only
-            filter_func=lambda sample: sample['dataset_id'] == config('UTCD.dataset_name2id')['multi_eurlex'],
-            remove_columns=['label', 'text'], n_sample=n_
-        )[0]
-        # TODO: remove arXiv for too long options
-        # gating with `if trainer.is_local_process_zero()`
-        # somehow causes `torchrun` to not terminate after 1st compute loss
-        ic(trainer.evaluate(eval_dataset=vl))
-    evaluate_ood()
+            vl = get_dset(
+                dataset_name=dataset_name,
+                d_map_func=dict(test=tokenize_func(tkzer, dataset_name=dataset_name, mode='test')), splits='test',
+                # Run on newly-added dset only
+                filter_func=lambda sample: sample['dataset_id'] == config('UTCD.dataset_name2id')['multi_eurlex'],
+                # **Note** no shuffling performed
+                remove_columns=['label', 'text'], n_sample=n_
+            )[0]
+            # vl = vl.select(range(1024))  # TODO: debugging
+            # gating with `if trainer.is_local_process_zero()`
+            # somehow causes `torchrun` to not terminate after 1st compute loss
+            ic(trainer.evaluate(eval_dataset=vl))
+        evaluate_ood()
+    # train()
+
+    evaluate_trained(in_domain=False, batch_size=48)
