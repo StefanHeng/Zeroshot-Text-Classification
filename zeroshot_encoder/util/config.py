@@ -1,4 +1,5 @@
 from typing import Tuple, List, Dict
+from collections import Counter
 
 import json
 
@@ -131,13 +132,23 @@ def path2dataset_info(d: Dict) -> Dict:
 
     def split2info(dset: List[Tuple[str, str]]) -> Dict:
         txts, lbs = zip(*dset)  # Heuristic on how the `json` are stored
-        txts_uniq, lbs_uniq = set(txts), set(lbs)
+        lbs_uniq = set(lbs)
+        count_txts = Counter(txts)
+        n_multi_label = sum(c > 1 for txt, c in count_txts.items())
+        if 'sentiment_tweets_2020' in d['path']:
+            from icecream import ic
+            ic('sentiment_tweets_2020')
+            for txt, c in count_txts.items():
+                if c > 1:
+                    labels = [lb for t, lb in dset if txt == t]
+                    print(f'text: {txt}, count: {c}, labels: {labels}')
         return dict(
             labels=sorted(lbs_uniq),
             n_label=len(lbs_uniq),
-            n_txt=len(txts_uniq),
+            n_text=len(count_txts),
             n_sample=len(dset),
-            multi_label=len(txts_uniq) < len(dset)
+            multi_label=len(count_txts) < len(dset),
+            n_multi_label=n_multi_label
         )
     d_out = {split: split2info(dset) for split, dset in dsets.items()}  # Labels for each split
     assert all(split in ['train', 'test'] for split in d_out.keys())
@@ -156,22 +167,9 @@ config['UTCD']['dataset_id2name'] = {i: dnm for i, dnm in enumerate(dnms)}
 
 
 if __name__ == '__main__':
-    import pandas as pd
     from icecream import ic
-
-    pd.set_option('expand_frame_repr', False)
-    pd.set_option('max_colwidth', 50)
 
     fl_nm = 'config.json'
     ic(config)
-
-    # infos = [
-    #     dict(dataset_name=dnm, aspect=d_dset['aspect'], out_of_domain=d_dset['out_of_domain'])
-    #     | {f'{split}-{k}': v for split, d_info in d_dset['splits'].items() for k, v in d_info.items()}
-    #     # for split, d_info in d_dset['splits'].items()
-    #     for dnm, d_dset in d_dsets.items()
-    # ]
-    # infos = pd.DataFrame(infos)
-
     with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'w') as f:
         json.dump(config, f, indent=4)

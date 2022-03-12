@@ -299,6 +299,16 @@ class MyFormatter(logging.Formatter):
         return self.formatter[entry.levelno].format(entry)
 
 
+def get_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(MyFormatter())
+    logger.addHandler(handler)
+    return logger
+
+
 def fmt_num(n: Union[float, int]):
     """
     Convert number to human-readable format, in e.g. Thousands, Millions
@@ -467,14 +477,14 @@ if __name__ == '__main__':
         sanity_check('UTCD-ood')
     # get_utcd_ood()
 
-    process_utcd_dataset(ood=True, join=False)
+    # process_utcd_dataset(ood=True, join=False)
 
     def sanity_check_ln_eurlex():
         path = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', 'multi_eurlex')
         ic(path)
         dset = datasets.load_from_disk(path)
         ic(dset, len(dset))
-    sanity_check_ln_eurlex()
+    # sanity_check_ln_eurlex()
     # ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
 
     def output_utcd_info():
@@ -482,3 +492,6 @@ if __name__ == '__main__':
         ic(df)
         df.to_csv(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'utcd-info.csv'))
     output_utcd_info()
+
+    # lg = get_logger('test-lang')
+    # ic(lg, type(lg))

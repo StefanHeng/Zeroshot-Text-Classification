@@ -91,9 +91,10 @@
                             "surprise"
                         ],
                         "n_label": 6,
-                        "n_txt": 15969,
+                        "n_text": 15969,
                         "n_sample": 16000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 31
                     },
                     "test": {
                         "labels": [
@@ -105,9 +106,10 @@
                             "surprise"
                         ],
                         "n_label": 6,
-                        "n_txt": 2000,
+                        "n_text": 2000,
                         "n_sample": 2000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -149,9 +151,10 @@
                             "surprise sentiment"
                         ],
                         "n_label": 28,
-                        "n_txt": 43227,
+                        "n_text": 43227,
                         "n_sample": 51103,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 7192
                     },
                     "test": {
                         "labels": [
@@ -185,9 +188,10 @@
                             "surprise sentiment"
                         ],
                         "n_label": 28,
-                        "n_txt": 5421,
+                        "n_text": 5421,
                         "n_sample": 6329,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 842
                     }
                 }
             },
@@ -204,9 +208,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 45586,
+                        "n_text": 45586,
                         "n_sample": 45615,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 25
                     },
                     "test": {
                         "labels": [
@@ -215,9 +220,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 12284,
+                        "n_text": 12284,
                         "n_sample": 12284,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -381,9 +387,10 @@
                             "yes"
                         ],
                         "n_label": 150,
-                        "n_txt": 15000,
+                        "n_text": 15000,
                         "n_sample": 15000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     },
                     "test": {
                         "labels": [
@@ -539,9 +546,10 @@
                             "yes"
                         ],
                         "n_label": 150,
-                        "n_txt": 4500,
+                        "n_text": 4500,
                         "n_sample": 4500,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -591,9 +599,10 @@
                             "Transfer Money"
                         ],
                         "n_label": 36,
-                        "n_txt": 114251,
+                        "n_text": 114251,
                         "n_sample": 153011,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 8244
                     },
                     "test": {
                         "labels": [
@@ -633,9 +642,10 @@
                             "Share Location"
                         ],
                         "n_label": 34,
-                        "n_txt": 32692,
+                        "n_text": 32692,
                         "n_sample": 39386,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 1793
                     }
                 }
             },
@@ -740,9 +750,10 @@
                             "wemo plug on"
                         ],
                         "n_label": 91,
-                        "n_txt": 11502,
+                        "n_text": 11502,
                         "n_sample": 11514,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 12
                     },
                     "test": {
                         "labels": [
@@ -823,9 +834,10 @@
                             "wemo off"
                         ],
                         "n_label": 75,
-                        "n_txt": 2592,
+                        "n_text": 2592,
                         "n_sample": 2593,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 1
                     }
                 }
             },
@@ -843,9 +855,10 @@
                             "World News"
                         ],
                         "n_label": 4,
-                        "n_txt": 120000,
+                        "n_text": 120000,
                         "n_sample": 120000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     },
                     "test": {
                         "labels": [
@@ -855,9 +868,10 @@
                             "World News"
                         ],
                         "n_label": 4,
-                        "n_txt": 7600,
+                        "n_text": 7600,
                         "n_sample": 7600,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -885,9 +899,10 @@
                             "Written Work"
                         ],
                         "n_label": 14,
-                        "n_txt": 559879,
+                        "n_text": 559879,
                         "n_sample": 560000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 95
                     },
                     "test": {
                         "labels": [
@@ -907,9 +922,10 @@
                             "Written Work"
                         ],
                         "n_label": 14,
-                        "n_txt": 70000,
+                        "n_text": 70000,
                         "n_sample": 70000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -933,9 +949,10 @@
                             "Sports"
                         ],
                         "n_label": 10,
-                        "n_txt": 1365398,
+                        "n_text": 1365398,
                         "n_sample": 1400000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 19952
                     },
                     "test": {
                         "labels": [
@@ -951,9 +968,10 @@
                             "Sports"
                         ],
                         "n_label": 10,
-                        "n_txt": 59767,
+                        "n_text": 59767,
                         "n_sample": 60000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 147
                     }
                 }
             },
@@ -969,9 +987,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 2,
-                        "n_txt": 3594783,
+                        "n_text": 3594783,
                         "n_sample": 3600000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 4277
                     },
                     "test": {
                         "labels": [
@@ -979,9 +998,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 2,
-                        "n_txt": 399917,
+                        "n_text": 399917,
                         "n_sample": 400000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 80
                     }
                 }
             },
@@ -998,9 +1018,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 1808,
+                        "n_text": 1808,
                         "n_sample": 1810,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 2
                     },
                     "test": {
                         "labels": [
@@ -1009,9 +1030,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 453,
+                        "n_text": 453,
                         "n_sample": 454,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 1
                     }
                 }
             },
@@ -1028,9 +1050,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 650000,
+                        "n_text": 650000,
                         "n_sample": 650000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     },
                     "test": {
                         "labels": [
@@ -1039,9 +1062,10 @@
                             "positive sentiment"
                         ],
                         "n_label": 3,
-                        "n_txt": 50000,
+                        "n_text": 50000,
                         "n_sample": 50000,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -1212,9 +1236,10 @@
                             "Trading and Market Microstructure"
                         ],
                         "n_label": 157,
-                        "n_txt": 550288,
+                        "n_text": 550288,
                         "n_sample": 641911,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 81265
                     },
                     "test": {
                         "labels": [
@@ -1377,9 +1402,10 @@
                             "Trading and Market Microstructure"
                         ],
                         "n_label": 157,
-                        "n_txt": 64349,
+                        "n_text": 64349,
                         "n_sample": 65446,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 1077
                     }
                 }
             },
@@ -1414,9 +1440,10 @@
                             "transport"
                         ],
                         "n_label": 21,
-                        "n_txt": 54986,
+                        "n_text": 54986,
                         "n_sample": 177739,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 53925
                     },
                     "test": {
                         "labels": [
@@ -1443,9 +1470,10 @@
                             "transport"
                         ],
                         "n_label": 21,
-                        "n_txt": 5000,
+                        "n_text": 5000,
                         "n_sample": 17969,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 4939
                     }
                 }
             },
@@ -1468,9 +1496,10 @@
                             "Textiles; Paper"
                         ],
                         "n_label": 9,
-                        "n_txt": 24950,
+                        "n_text": 24950,
                         "n_sample": 25000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 49
                     },
                     "test": {
                         "labels": [
@@ -1485,9 +1514,10 @@
                             "Textiles; Paper"
                         ],
                         "n_label": 9,
-                        "n_txt": 4997,
+                        "n_text": 4997,
                         "n_sample": 5000,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 3
                     }
                 }
             },
@@ -1519,9 +1549,10 @@
                             "Virtual currency"
                         ],
                         "n_label": 18,
-                        "n_txt": 626004,
+                        "n_text": 626004,
                         "n_sample": 626489,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 399
                     },
                     "test": {
                         "labels": [
@@ -1545,9 +1576,10 @@
                             "Virtual currency"
                         ],
                         "n_label": 18,
-                        "n_txt": 156602,
+                        "n_text": 156602,
                         "n_sample": 156635,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 30
                     }
                 }
             },
@@ -1638,9 +1670,10 @@
                             "wrong exchange rate for cash withdrawal"
                         ],
                         "n_label": 77,
-                        "n_txt": 10003,
+                        "n_text": 10003,
                         "n_sample": 10003,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     },
                     "test": {
                         "labels": [
@@ -1723,9 +1756,10 @@
                             "wrong exchange rate for cash withdrawal"
                         ],
                         "n_label": 77,
-                        "n_txt": 3080,
+                        "n_text": 3080,
                         "n_sample": 3080,
-                        "multi_label": false
+                        "multi_label": false,
+                        "n_multi_label": 0
                     }
                 }
             },
@@ -1746,9 +1780,10 @@
                             "Search Screening Event"
                         ],
                         "n_label": 7,
-                        "n_txt": 13615,
+                        "n_text": 13615,
                         "n_sample": 13784,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 120
                     },
                     "test": {
                         "labels": [
@@ -1761,9 +1796,10 @@
                             "Search Screening Event"
                         ],
                         "n_label": 7,
-                        "n_txt": 697,
+                        "n_text": 697,
                         "n_sample": 700,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 3
                     }
                 }
             },
@@ -1845,9 +1881,10 @@
                             "weather query"
                         ],
                         "n_label": 68,
-                        "n_txt": 20524,
+                        "n_text": 20524,
                         "n_sample": 20549,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 24
                     },
                     "test": {
                         "labels": [
@@ -1921,9 +1958,10 @@
                             "weather query"
                         ],
                         "n_label": 68,
-                        "n_txt": 5165,
+                        "n_text": 5165,
                         "n_sample": 5166,
-                        "multi_label": true
+                        "multi_label": true,
+                        "n_multi_label": 1
                     }
                 }
             }

@@ -110,7 +110,8 @@ if __name__ == '__main__':
         domain = 'in-domain' if in_domain else 'out-of-domain'
         d_dnms = D_DNMS[domain]
         fig, axes = plt.subplots(1, (len(d_dnms)), figsize=(16, 6))
-        models = list(set(md for md, strat in setups))
+        # Ordered, uniq list names, for consistent color code between runs
+        models = list(OrderedDict((md, None) for md, strat in setups))
         n_color = len(models)+1
         cs = sns.color_palette(palette='husl', n_colors=n_color)
 
@@ -174,5 +175,13 @@ if __name__ == '__main__':
         ('bi-encoder', 'rand'),
         ('gpt2-nvidia', 'NA'),
     ]
-    # plot_approaches_performance(setups_out, in_domain=False, save=False)
-    plot_approaches_performance(setups_out, in_domain=False, save=True)
+
+    def plot_in_domain():
+        # plot_approaches_performance(setups_in, in_domain=True, save=False)
+        plot_approaches_performance(setups_in, in_domain=True, save=True)
+    plot_in_domain()
+
+    def plot_out_of_domain():
+        # plot_approaches_performance(setups_out, in_domain=False, save=False)
+        plot_approaches_performance(setups_out, in_domain=False, save=True)
+    plot_out_of_domain()
