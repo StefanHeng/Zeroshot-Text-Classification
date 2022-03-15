@@ -109,7 +109,7 @@ if __name__ == '__main__':
     def plot_approaches_performance(setups: List[Tuple[str, str]], in_domain=True, save=False):
         domain = 'in-domain' if in_domain else 'out-of-domain'
         d_dnms = D_DNMS[domain]
-        fig, axes = plt.subplots(1, (len(d_dnms)), figsize=(16, 6))
+        fig, axes = plt.subplots(1, len(d_dnms), figsize=(16, 6))
         # Ordered, uniq list names, for consistent color code between runs
         models = list(OrderedDict((md, None) for md, strat in setups))
         n_color = len(models)+1
@@ -136,7 +136,7 @@ if __name__ == '__main__':
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
             dnm_ints = list(range(len(dnms)))
-            if aspect == 'topic':  # TODO: remove
+            if aspect == 'topic' and not in_domain:  # TODO: remove
                 ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
             else:
                 ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
@@ -184,4 +184,4 @@ if __name__ == '__main__':
     def plot_out_of_domain():
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_approaches_performance(setups_out, in_domain=False, save=True)
-    plot_out_of_domain()
+    # plot_out_of_domain()

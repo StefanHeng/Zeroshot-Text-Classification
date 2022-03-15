@@ -3,10 +3,13 @@ import re
 import sys
 import json
 import math
+import time
 import logging
 import datetime
 import itertools
-from typing import Union, Tuple, List, Dict, Iterable, TypeVar
+import configparser
+import concurrent.futures
+from typing import Union, Tuple, List, Dict, Iterable, TypeVar, Callable
 from functools import reduce
 from collections import OrderedDict
 
@@ -52,6 +55,18 @@ def join_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
     return out
 
 
+def conc_map(fn: Callable[[T], K], it: Iterable[T]) -> Iterable[K]:
+    """
+    Wrapper for `concurrent.futures.map`
+
+    :param fn: A function
+    :param it: A list of elements
+    :return: Iterator of `lst` elements mapped by `fn` with concurrency
+    """
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        return executor.map(fn, it)
+
+
 def lst2uniq_ids(lst: List[T]) -> List[int]:
     """
     Each unique element in list assigned an unique id
@@ -60,7 +75,7 @@ def lst2uniq_ids(lst: List[T]) -> List[int]:
     return [elm2id[e] for e in lst]
 
 
-def get(dic, ks):
+def get(dic: Dict, ks: str):
     """
     :param dic: Potentially multi-level dictionary
     :param ks: Potentially `.`-separated keys
@@ -118,6 +133,19 @@ def now(as_str=True, sep=':'):
     return d.strftime(f'%Y-%m-%d %H{sep}%M{sep}%S') if as_str else d  # Considering file output path
 
 
+def profile_runtime(callback: Callable, sleep: Union[float, int] = None):
+    import cProfile
+    import pstats
+    profiler = cProfile.Profile()
+    profiler.enable()
+    callback()
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('cumtime')
+    if sleep != 0:    # Sometimes, the top rows in `print_states` are now shown properly
+        time.sleep(sleep)
+    stats.print_stats()
+
+
 def fmt_dt(secs: Union[int, float, datetime.timedelta]):
     if isinstance(secs, datetime.timedelta):
         secs = secs.seconds + (secs.microseconds/1e6)
@@ -134,7 +162,11 @@ def fmt_dt(secs: Union[int, float, datetime.timedelta]):
         return f'{round(secs)}s'
 
 
-def log(s, c: str = 'log', c_time='green', as_str=False):
+def config_parser2dict(conf: configparser.ConfigParser) -> Dict:
+    return {sec: dict(conf[sec]) for sec in conf.sections()}
+
+
+def log(s, c: str = 'log', c_time='green', as_str=False, bold=False):
     """
     Prints `s` to console with color `c`
     """
@@ -165,14 +197,16 @@ def log(s, c: str = 'log', c_time='green', as_str=False):
         )
     if c in log.d:
         c = log.d[c]
+    if bold:
+        c += colorama.Style.BRIGHT
     if as_str:
         return f'{c}{s}{log.reset}'
     else:
         print(f'{c}{log(now(), c=c_time, as_str=True)}| {s}{log.reset}')
 
 
-def log_s(s, c):
-    return log(s, c=c, as_str=True)
+def log_s(s, c, bold = False):
+    return log(s, c=c, as_str=True, bold=bold)
 
 
 def logi(s):

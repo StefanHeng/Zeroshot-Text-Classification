@@ -46,7 +46,7 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
 
     if strategy == 'NA':  # GPT2
         assert model_name == 'gpt2-nvidia'
-        paths.extend(['in-domain', '2022-03-11 18-10-57'] if in_domain else ['out-of-domain', '2022-03-11 18-55-01'])
+        paths.extend(['in-domain', '2022-03-11 23-50-25'] if in_domain else ['out-of-domain', '2022-03-12 00-25-13'])
     else:  # BERT models
         paths.extend([strategy, 'results'])
         paths.append('in-domain' if in_domain else 'out-of-domain')
