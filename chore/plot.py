@@ -100,7 +100,7 @@ if __name__ == '__main__':
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
         md_nm, strat = md_nm_n_strat2str_out(model_name, strategy)
-        dir_save = os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {md_nm} with {strat}')
+        dir_save = os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in config('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
@@ -120,7 +120,9 @@ if __name__ == '__main__':
                 dnms_ = dnms
                 if aspect == 'topic':
                     # TODO: some models had eval number for the new datasets already, swap only those for now
-                    if md_nm in ['bi-encoder', 'gpt2-nvidia'] or (md_nm == 'bert-nli' and strat == 'vect'):
+                    if md_nm in ['bi-encoder', 'gpt2-nvidia'] or \
+                            (md_nm == 'bert-nli' and strat == 'vect') or \
+                            (md_nm == 'dual-bi-encoder' and strat == 'rand'):
                         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage
@@ -156,7 +158,7 @@ if __name__ == '__main__':
         fig.supylabel('Classification Accuracy (%)')
         fig.supxlabel('Dataset')
         if save:  # TODO: distance between dsets
-            plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(sep="-")}, {title}.png'), dpi=300)
+            plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
         else:
             plt.show()
 
@@ -164,6 +166,7 @@ if __name__ == '__main__':
         ('binary-bert', 'rand'), ('binary-bert', 'vect'),
         ('bert-nli', 'rand'), ('bert-nli', 'vect'),
         ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
+        ('dual-bi-encoder', 'rand'),
         ('gpt2-nvidia', 'NA')
     ]
     # plot_approaches_performance(save=True)
@@ -173,15 +176,16 @@ if __name__ == '__main__':
         ('binary-bert', 'rand'),
         ('bert-nli', 'rand'), ('bert-nli', 'vect'),
         ('bi-encoder', 'rand'),
+        ('dual-bi-encoder', 'rand'),
         ('gpt2-nvidia', 'NA'),
     ]
 
     def plot_in_domain():
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
         plot_approaches_performance(setups_in, in_domain=True, save=True)
-    plot_in_domain()
+    # plot_in_domain()
 
     def plot_out_of_domain():
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_approaches_performance(setups_out, in_domain=False, save=True)
-    # plot_out_of_domain()
+    plot_out_of_domain()

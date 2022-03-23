@@ -9,7 +9,8 @@ _CONFIG = {
     'model-name': {
         'binary-bert': 'Binary BERT',
         'bert-nli': 'BERT-NLI',
-        'bi-encoder': 'Bi-encoder',
+        'bi-encoder': 'Bi-Encoder',
+        'dual-bi-encoder': 'Dual Bi-encoder',
         'gpt2-nvidia': 'GPT2-NVIDIA'
     },
     'sampling-strategy': dict(
@@ -35,7 +36,7 @@ DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 
 def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Callable:
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
-    assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'gpt2-nvidia']
+    assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'dual-bi-encoder', 'gpt2-nvidia']
     if model_name == 'bert-nli':
         paths.append('nli_bert')
     elif model_name == 'binary-bert':
