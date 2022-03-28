@@ -10,11 +10,12 @@ _CONFIG = {
         'binary-bert': 'Binary BERT',
         'bert-nli': 'BERT-NLI',
         'bi-encoder': 'Bi-Encoder',
-        'dual-bi-encoder': 'Dual Bi-encoder',
+        'dual-bi-encoder': 'Dual Bi-Encoder',
         'gpt2-nvidia': 'GPT2-NVIDIA'
     },
     'sampling-strategy': dict(
-        rand='Random Negative Sampling', vect='Word2Vec Average Extremes', NA='-',  # not applicable
+        rand='Random Negative Sampling', vect='Word2Vec Average Extremes',
+        none='Positive Labels Only', NA='-',  # not applicable
     )
 }
 
@@ -43,7 +44,7 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
         paths.append('binary_bert')
     else:
         paths.append(model_name)
-    assert strategy in ['rand', 'vect', 'NA']  # # Radnom negative sampling; word2vec average label selection
+    assert strategy in ['rand', 'vect', 'none', 'NA']  # # Radnom negative sampling; word2vec average label selection
 
     if strategy == 'NA':  # GPT2
         assert model_name == 'gpt2-nvidia'
@@ -57,7 +58,7 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
 def md_nm_n_strat2str_out(model_name: str, strategy: str, pprint=False) -> Union[Tuple[str, str], str]:
     md_nm, strat = _CONFIG['model-name'][model_name], _CONFIG['sampling-strategy'][strategy]
     if pprint:
-        return f'{md_nm} with {strat}' if strat != '-' else md_nm
+        return f'{md_nm} w/ {strat}' if strat != '-' else md_nm
     else:
         return md_nm, strat
 

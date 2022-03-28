@@ -122,7 +122,7 @@ if __name__ == '__main__':
                     # TODO: some models had eval number for the new datasets already, swap only those for now
                     if md_nm in ['bi-encoder', 'gpt2-nvidia'] or \
                             (md_nm == 'bert-nli' and strat == 'vect') or \
-                            (md_nm == 'dual-bi-encoder' and strat == 'rand'):
+                            (md_nm == 'dual-bi-encoder' and strat == 'none'):
                         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage
@@ -131,7 +131,7 @@ if __name__ == '__main__':
                     )
                 ]
                 dnm_ints = list(range(len(dnms_)))
-                line_style = '-' if strat in ['rand', 'NA'] else ':'
+                line_style = ':' if strat == 'vect' else '-'
                 i_color = models.index(md_nm)
                 ax.plot(
                     dnm_ints, scores, c=cs[i_color], ls=line_style, lw=1, marker='.', ms=8,
@@ -166,7 +166,7 @@ if __name__ == '__main__':
         ('binary-bert', 'rand'), ('binary-bert', 'vect'),
         ('bert-nli', 'rand'), ('bert-nli', 'vect'),
         ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
-        ('dual-bi-encoder', 'rand'),
+        ('dual-bi-encoder', 'none'),
         ('gpt2-nvidia', 'NA')
     ]
     # plot_approaches_performance(save=True)
@@ -176,14 +176,14 @@ if __name__ == '__main__':
         ('binary-bert', 'rand'),
         ('bert-nli', 'rand'), ('bert-nli', 'vect'),
         ('bi-encoder', 'rand'),
-        ('dual-bi-encoder', 'rand'),
+        ('dual-bi-encoder', 'none'),
         ('gpt2-nvidia', 'NA'),
     ]
 
     def plot_in_domain():
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
         plot_approaches_performance(setups_in, in_domain=True, save=True)
-    # plot_in_domain()
+    plot_in_domain()
 
     def plot_out_of_domain():
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
