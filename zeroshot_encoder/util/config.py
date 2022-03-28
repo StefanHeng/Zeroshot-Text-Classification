@@ -1,15 +1,8 @@
-# import itertools
-# import os
-# import re
-# import json
-# from typing import Tuple, List, Dict, Callable
-#
-# import pandas as pd
+import numpy as np
+from scipy.stats import norm
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
-# from zeroshot_encoder.util import PATH_BASE, DIR_PROJ, DIR_DSET, PKG_NM
-# from zeroshot_encoder.util import get_logger
 from zeroshot_encoder.util import *
 
 
@@ -90,20 +83,19 @@ config = {
     'UTCD': dict(
         datasets=dict(
             # in-domain evaluation has the same labels as training
-            # emotion=dict(
-            #     path='UTCD/in-domain/emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
-            # go_emotion=dict(
-            #     path='UTCD/in-domain/go_emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
-            # sentiment_tweets_2020=dict(
-            #     path='UTCD/in-domain/sentiment_tweets_2020', aspect='sentiment',
-            #     eval_labels_same=True, out_of_domain=False
-            # ),
-            # clinc_150=dict(
-            #     path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
-            # # `eval_labels_same` := has some unique test labels
-            # # TODO: fix `labels`
-            # # sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            # slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            emotion=dict(
+                path='UTCD/in-domain/emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
+            go_emotion=dict(
+                path='UTCD/in-domain/go_emotion', aspect='sentiment', eval_labels_same=True, out_of_domain=False),
+            sentiment_tweets_2020=dict(
+                path='UTCD/in-domain/sentiment_tweets_2020', aspect='sentiment',
+                eval_labels_same=True, out_of_domain=False
+            ),
+            clinc_150=dict(
+                path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
+            # `eval_labels_same` := has some unique test labels
+            sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
             ag_news=dict(path='UTCD/in-domain/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
             dbpedia=dict(path='UTCD/in-domain/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
             yahoo=dict(path='UTCD/in-domain/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
@@ -118,7 +110,8 @@ config = {
             # yelp=dict(path='UTCD-ood/yelp', aspect='sentiment', eval_labels_same=True, out_of_domain=True),
             # # Removed for too many options blow up GPT2's 1024 token length; TODO: remove, keep now cos plotting
             # arxiv=dict(path='UTCD-ood/arxiv', aspect='topic', eval_labels_same=True, out_of_domain=True),
-            # multi_eurlex=dict(path='UTCD-ood/multi_eurlex', aspect='topic', eval_labels_same=True, out_of_domain=True),
+            # multi_eurlex=dict(
+            #   path='UTCD-ood/multi_eurlex', aspect='topic', eval_labels_same=True, out_of_domain=True),
             # patent=dict(path='UTCD-ood/patent', aspect='topic', eval_labels_same=True, out_of_domain=True),
             # consumer_finance=dict(
             #     path='UTCD-ood/consumer_finance', aspect='topic', eval_labels_same=True, out_of_domain=True
@@ -136,8 +129,6 @@ config = {
 
 path_dset = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
 ext = config['UTCD']['dataset_ext']
-
-# from icecream import ic  # TODO: debugging
 
 
 def _re_call() -> Callable[[str], int]:
@@ -170,9 +161,6 @@ def get_tokenizer_len(s: str, mode: str = 're') -> int:
 tokenize_modes = ['re', 'bert', 'gpt2']
 
 
-from icecream import ic  # TODO: debugging
-
-
 def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
     """
     :return: 2-tuple of (dataset information for `config`, number of tokens for plot)
@@ -180,44 +168,32 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
     path = os.path.join(path_dset, f'{d["path"]}.{ext}')
     with open(path) as fl:
         dsets: Dict = json.load(fl)
-    # ic(path, dsets.keys())
 
     def split2info(split, dset: Dict[str, List[str]]) -> Dict:
         # Based on heuristics on how the `json` are stored
-        # ic(type(dset), len(dset.keys()))
-        # txts, lbs = list(dset.keys()), sum([lbs for lbs in dset.values()], start=[])
-        ic('start call', now())
-        # lbs = sum([lbs for lbs in dset.values()], start=[])
-        # ic('computed lbs', now())
-        # lst_n_txts, lst_n_lbs = [], []
-        # n_text, n_pair = len(txts), sum([len(lbs) for lbs in dset.values()])
-        # creating a list of all the strings consume mems
+        # creating a list of all the strings consume memory for prohibitively large datasets
         n_text_, n_pair_ = len(dset.keys()), sum([len(lbs) for lbs in dset.values()])
-        ic('computed text & pair counts', now())
-        # n_text_, n_pair_ = len(dset.keys()), len(lbs)
         lbs_uniq = set().union(*dset.values())
         n_multi_label = sum([len(lbs_) > 1 for lbs_ in dset.values()])
-        ic('computed n_multi_label', now())
-        # txt_n_toks = {mode: [get_tokenizer_len(t, mode) for t in txts] for mode in modes}
-        # lb_n_toks = {mode: [get_tokenizer_len(t, mode) for t in lbs] for mode in modes}
         txt_n_toks, lb_n_toks = dict(), dict()
         for mode in tokenize_modes:
-            txt_n_toks_, lb_n_toks_ = [], []
-            n, desc_t, desc_l = 15, f'{split}-{mode}-text', f'{split}-{mode}-label'
-
-            # if mode == 're':
-            #     for lb in lbs_uniq:
-            #         ic(lb, get_tokenizer_len(lb, mode))
+            # txt_n_toks_, lb_n_toks_ = [], []
+            txt_n_toks_, lb_n_toks_ = np.empty(n_text_, dtype=int), np.empty(n_pair_, dtype=int)
+            n, desc_t, desc_l = 16, f'{split}-{mode}-text', f'{split}-{mode}-label'
             lb2tokenize_len = {lb: get_tokenizer_len(lb, mode) for lb in lbs_uniq}
 
+            i = 0
             for t in tqdm(dset.keys(), total=len(dset), desc=f'{desc_t:>{n}}'):
-                txt_n_toks_.append(get_tokenizer_len(t, mode))
+                # txt_n_toks_.append(get_tokenizer_len(t, mode))
+                txt_n_toks_[i] = get_tokenizer_len(t, mode)
+                i += 1
+            i = 0
             for t in tqdm(dset.values(), desc=f'{desc_l:>{n}}'):
-                lb_n_toks_.extend([lb2tokenize_len[lb] for lb in t])
-            # txt_n_toks[mode] = [get_tokenizer_len(t, mode) for t in txts]
-            # lb_n_toks[mode] = [get_tokenizer_len(t, mode) for t in lbs]
+                for lb in t:
+                    lb_n_toks_[i] = lb2tokenize_len[lb]
+                    i += 1
+                # lb_n_toks_.extend([lb2tokenize_len[lb] for lb in t])
             txt_n_toks[mode], lb_n_toks[mode] = txt_n_toks_, lb_n_toks_
-        # exit(1)
         return dict(
             labels=sorted(lbs_uniq),
             n_label=len(lbs_uniq),
@@ -235,21 +211,19 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
     # sum over all splits of the dataset for token length computation
     txt_n_toks_all = [d_out.pop('txt_n_toks') for d_out in d_out.values()]
     lb_n_toks_all = [d_out.pop('lb_n_toks') for d_out in d_out.values()]
-    txt_n_toks_all = {mode: sum([toks[mode] for toks in txt_n_toks_all], start=[]) for mode in tokenize_modes}
-    lb_n_toks_all = {mode: sum([toks[mode] for toks in lb_n_toks_all], start=[]) for mode in tokenize_modes}
-    n_text_all = sum([d_out['n_text'] for d_out in d_out.values()])
-    n_pair_all = sum([d_out['n_pair'] for d_out in d_out.values()])
-    avg_toks = {f'{mode}-txt_avg_tokens': sum(txt_n_toks_all[mode]) / n_text_all for mode in tokenize_modes} | \
-               {f'{mode}-lb_avg_tokens': sum(lb_n_toks_all[mode]) / n_pair_all for mode in tokenize_modes}
-    # ic(d['path'])
-    # ic(sorted(labels), sorted(set().union(*[set(d['labels']) for d in d_out.values()])), sorted(d_out['train']['labels']))
-    # ic(len(d_out['train']['labels']), len(d_out['test']['labels']))
-    # ic(len(set().union(*[set(d['labels']) for d in d_out.values()])))
-    # assert sorted(labels) == sorted(d_out['train']['labels'])
+    # txt_n_toks_all = {mode: sum([toks[mode] for toks in txt_n_toks_all], start=[]) for mode in tokenize_modes}
+    # lb_n_toks_all = {mode: sum([toks[mode] for toks in lb_n_toks_all], start=[]) for mode in tokenize_modes}
+    txt_n_toks_all = {mode: np.concatenate([toks[mode] for toks in txt_n_toks_all]) for mode in tokenize_modes}
+    lb_n_toks_all = {mode: np.concatenate([toks[mode] for toks in lb_n_toks_all]) for mode in tokenize_modes}
+    # n_text_all = sum([d_out['n_text'] for d_out in d_out.values()])
+    # n_pair_all = sum([d_out['n_pair'] for d_out in d_out.values()])
+    # avg_toks = {f'{mode}-txt_avg_tokens': sum(txt_n_toks_all[mode]) / n_text_all for mode in tokenize_modes} | \
+    #            {f'{mode}-lb_avg_tokens': sum(lb_n_toks_all[mode]) / n_pair_all for mode in tokenize_modes}
+    avg_toks = {f'{mode}-txt_avg_tokens': txt_n_toks_all[mode].mean() for mode in tokenize_modes} | \
+               {f'{mode}-lb_avg_tokens': lb_n_toks_all[mode].mean() for mode in tokenize_modes}
     assert set(labels) == set().union(*[set(d['labels']) for d in d_out.values()])
     if d['eval_labels_same']:
         assert d_out['train']['labels'] == d_out['test']['labels']
-    # return d_out
     return d_out | avg_toks, dict(text=txt_n_toks_all, label=lb_n_toks_all)
 
 
@@ -269,39 +243,71 @@ def extract_utcd_meta() -> Dict:
     return d_n_toks
 
 
-def plot_utcd_n_toks(d_n_toks: Dict):
+def plot_utcd_n_toks(d_n_toks: Dict, save=True):
+    logger = get_logger('Token Lengths Distribution Plot')
     d_df = dict()
     text_types = ['text', 'label']
     for text_type, mode in itertools.product(text_types, tokenize_modes):
-        dnm2n_tok = {dnm: d_n_toks[dnm][text_type][mode] for dnm in d_n_toks.keys()}
-        toks_unrolled = sum([[(n_tok, dnm) for n_tok in n_toks] for dnm, n_toks in dnm2n_tok.items()], start=[])
-        d_df[(text_type, mode)] = pd.DataFrame(toks_unrolled, columns=['n_token', 'dataset_name'])
-        # ic(text_type, mode, d_df[(text_type, mode)])
+        logger.info(f'Processing {logi(text_type)} with {logi(mode)} tokenization')
+        # dnm2n_tok = {dnm: d_n_toks[dnm][text_type][mode] for dnm in d_n_toks.keys()}
+        # toks_unrolled = sum([[(n_tok, dnm) for n_tok in n_toks] for dnm, n_toks in dnm2n_tok.items()], start=[])
+        dnm2n_tok = OrderedDict((dnm, d_n_toks[dnm][text_type][mode]) for dnm in d_n_toks.keys())
+        # from icecream import ic
+        # ic(dnm2n_tok)
+        # ic(sum([[dnm] * len(n_toks) for dnm, n_toks in dnm2n_tok.items()], start=[])[:10])
+
+        d_df[(text_type, mode)] = pd.DataFrame(dict(
+            n_token=np.concatenate(list(dnm2n_tok.values())),
+            dataset_name=sum([[dnm] * len(n_toks) for dnm, n_toks in dnm2n_tok.items()], start=[])
+        ))
 
     fig, axes = plt.subplots(2, 3, figsize=(16, 9))
-    for i_row, text_type in enumerate(text_types):
-        for i_col, mode in enumerate(tokenize_modes):
-            # ic(i_row, i_col, text_type, mode)
-            ax = axes[i_row, i_col]
-            df = d_df[(text_type, mode)]
-            n_bin = df.n_token.max() - df.n_token.min() + 1
-            legend = i_row == 0 and i_col == 0
-            sns.histplot(data=df, x='n_token', hue='dataset_name', kde=True, bins=n_bin, legend=legend, ax=ax)
-            ax.set_title(f'{text_type} with {mode} tokenization')
-    # for ax in axes:
-    #     ax.set_xlim([0, 100])  # empirical
+    n_tt, n_tm = len(text_types), len(tokenize_modes)
+    # for i_row, i_col in tqdm(itertools.product(range(n_tt), range(n_tm)), total=n_tt * n_tm, desc='Plotting'):
+    for i_row, i_col in itertools.product(range(n_tt), range(n_tm)):
+    # for i_row, text_type in enumerate(text_types):
+    #     for i_col, mode in enumerate(tokenize_modes):
+        text_type, mode = text_types[i_row], tokenize_modes[i_col]
+        # from icecream import ic
+        # ic(i_row, i_col, text_type, mode)
+
+        logger.info(f'Plotting {logi(text_type)} with {logi(mode)} tokenization')
+        ax = axes[i_row, i_col]
+        df = d_df[(text_type, mode)]
+        n_bin = df.n_token.max() - df.n_token.min() + 1
+        # ic(df, n_bin)
+        legend = i_row == 0 and i_col == 0
+        sns.histplot(
+            data=df, x='n_token', hue='dataset_name', kde=text_type == 'text', bins=n_bin, legend=legend, ax=ax
+        )
+        ax.set_title(f'{text_type} with {mode} tokenization')
+        if text_type == 'text':  # empirical, cos there are outliers for `text`s
+            # n_toks = df.n_token.values
+            # from icecream import ic
+            # ic(n_toks, type(n_toks))
+            p = norm().cdf(3)  # quantile at 3std
+            # ic(df.n_token.min(), df.n_token.max(), df.n_token.quantile(p))
+            mi, ma = df.n_token.min(), math.ceil(df.n_token.quantile(p))
+            # ic(mi, ma)
+            ax.set_xlim([mi, ma])
+        else:
+            # from icecream import ic
+            xticks = ax.get_xticks()
+            # ic(xticks)
+            ax.set_xticks(list(range(math.floor(xticks.min()), math.ceil(xticks.max()) + 1)))
+            # exit(1)
     title, xlabel = 'Histogram of #tokens per sequence', '#token'
     plt.suptitle(title)
     plt.xlabel(xlabel)
     plt.ylabel('count')
     plt.suptitle('Tokenization length distribution across datasets')
-    # if save:
-    #     plt.savefig(os.path.join(PATH_BASE, DIR_PROJ, 'plot', f'{title}, {now(for_path=True)}.png'), dpi=300)
-    # else:
-    plt.show()
+    if save:
+        plt.savefig(os.path.join(PATH_BASE, DIR_PROJ, 'chore', 'plot', f'{title}, {now(for_path=True)}.png'), dpi=300)
+    else:
+        plt.show()
 
 
-plot_utcd_n_toks(extract_utcd_meta())
+plot_utcd_n_toks(extract_utcd_meta(), save=True)
 
 
 if __name__ == '__main__':
@@ -309,6 +315,5 @@ if __name__ == '__main__':
 
     fl_nm = 'config.json'
     ic(config)
-    exit(1)
     with open(os.path.join(PATH_BASE, DIR_PROJ, PKG_NM, 'util', 'config.json'), 'w') as f:
         json.dump(config, f, indent=4)

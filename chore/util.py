@@ -38,12 +38,12 @@ DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Callable:
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
     assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'dual-bi-encoder', 'gpt2-nvidia']
-    if model_name == 'bert-nli':
-        paths.append('nli_bert')
-    elif model_name == 'binary-bert':
-        paths.append('binary_bert')
-    else:
-        paths.append(model_name)
+    # if model_name == 'bert-nli':
+    #     paths.append('bert-nli')
+    # elif model_name == 'binary-bert':
+    #     paths.append('binary-bert')
+    # else:
+    paths.append(model_name)
     assert strategy in ['rand', 'vect', 'none', 'NA']  # # Radnom negative sampling; word2vec average label selection
 
     if strategy == 'NA':  # GPT2
@@ -51,7 +51,16 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
         paths.extend(['in-domain', '2022-03-11 23-50-25'] if in_domain else ['out-of-domain', '2022-03-12 00-25-13'])
     else:  # BERT models
         paths.extend([strategy, 'results'])
-        paths.append('in-domain' if in_domain else 'out-of-domain')
+        if in_domain:
+            if strategy == 'rand':
+                if model_name in ['binary-bert', 'bert-nli']:
+                    paths.append('in-domain, 03.24.22')
+                else:  # bi-encoder
+                    paths.append('in-domain, 03.26.22')
+            else:
+                paths.append('in-domain')
+        else:
+            paths.append('out-of-domain')
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 

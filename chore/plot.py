@@ -163,9 +163,9 @@ if __name__ == '__main__':
             plt.show()
 
     setups_in = [
-        ('binary-bert', 'rand'), ('binary-bert', 'vect'),
-        ('bert-nli', 'rand'), ('bert-nli', 'vect'),
-        ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
+        ('binary-bert', 'rand'),
+        ('bert-nli', 'rand'),
+        ('bi-encoder', 'rand'),
         ('dual-bi-encoder', 'none'),
         ('gpt2-nvidia', 'NA')
     ]
@@ -188,4 +188,4 @@ if __name__ == '__main__':
     def plot_out_of_domain():
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_approaches_performance(setups_out, in_domain=False, save=True)
-    plot_out_of_domain()
+    # plot_out_of_domain()
