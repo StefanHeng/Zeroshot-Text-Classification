@@ -1,5 +1,3 @@
-from typing import Callable
-
 from zeroshot_encoder.util import *
 
 
@@ -27,7 +25,7 @@ D_DNMS = {
     ]),
     'out-of-domain': OrderedDict([
         ('sentiment', ['amazon_polarity', 'finance_sentiment', 'yelp']),
-        ('intent', ['banking77', 'snips', 'nlu_evaluation']),  # TODO: 'arxiv' removed, add another?
+        ('intent', ['banking77', 'snips', 'nlu_evaluation']),
         ('topic', ['arxiv', 'patent', 'consumer_finance'])
     ])
 }
@@ -38,11 +36,6 @@ DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Callable:
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
     assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'dual-bi-encoder', 'gpt2-nvidia']
-    # if model_name == 'bert-nli':
-    #     paths.append('bert-nli')
-    # elif model_name == 'binary-bert':
-    #     paths.append('binary-bert')
-    # else:
     paths.append(model_name)
     assert strategy in ['rand', 'vect', 'none', 'NA']  # # Radnom negative sampling; word2vec average label selection
 
