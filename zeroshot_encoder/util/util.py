@@ -55,6 +55,16 @@ def join_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
     return out
 
 
+def group_n(it: Iterable[T], n: int) -> Iterable[Tuple[T]]:
+    # Credit: https://stackoverflow.com/a/8991553/10732321
+    it = iter(it)
+    while True:
+        chunk = tuple(itertools.islice(it, n))
+        if not chunk:
+            return
+        yield chunk
+
+
 def conc_map(fn: Callable[[T], K], it: Iterable[T]) -> Iterable[K]:
     """
     Wrapper for `concurrent.futures.map`

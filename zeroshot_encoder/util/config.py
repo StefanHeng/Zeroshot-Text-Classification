@@ -1,6 +1,6 @@
+import os
 from collections import Counter
 
-import numpy as np
 from scipy.stats import norm
 from transformers import AutoTokenizer
 from tqdm import tqdm
@@ -93,14 +93,14 @@ config = {
                 path='UTCD/in-domain/sentiment_tweets_2020', aspect='sentiment',
                 eval_labels_same=True, out_of_domain=False
             ),
-            clinc_150=dict(
-                path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
-            # `eval_labels_same` := has some unique test labels
-            sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            ag_news=dict(path='UTCD/in-domain/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
-            dbpedia=dict(path='UTCD/in-domain/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
-            yahoo=dict(path='UTCD/in-domain/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            # clinc_150=dict(
+            #     path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
+            # # `eval_labels_same` := has some unique test labels
+            # sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            # slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            # ag_news=dict(path='UTCD/in-domain/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            # dbpedia=dict(path='UTCD/in-domain/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            # yahoo=dict(path='UTCD/in-domain/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
             # Out-of-domain datasets: test split intended to evaluation
             # TODO: until new multi-label format supported
             # amazon_polarity=dict(
@@ -140,16 +140,23 @@ def _re_call() -> Callable[[str], int]:
     return lambda x: len(_re_call.token_pattern.findall(x))
 
 
-def _hf_call(model_name) -> Callable[[str], int]:
+def _hf_call(model_name) -> Callable[[Union[str, List[str]]], Union[int, List[int]]]:
     if not hasattr(_hf_call, 'd'):
         _hf_call.d = {}
     d = _hf_call.d
     if model_name not in d:
         d[model_name] = AutoTokenizer.from_pretrained(model_name)
-    return lambda x: len(d[model_name](x)['input_ids'])
+
+    def _call(x):
+        ids = d[model_name](x)['input_ids']
+        if isinstance(x, str):
+            return len(ids)
+        else:
+            return [len(i) for i in ids]
+    return _call
 
 
-def get_tokenizer_len(s: str, mode: str = 're') -> int:
+def get_tokenizer_len(s: Union[str, List[str]], mode: str = 're') -> Union[int, List[int]]:
     assert mode in ['re', 'bert', 'gpt2']
     if not hasattr(get_tokenizer_len, 'd_f'):
         get_tokenizer_len.d_f = dict(
@@ -163,9 +170,13 @@ def get_tokenizer_len(s: str, mode: str = 're') -> int:
 tokenize_modes = ['re', 'bert', 'gpt2']
 
 
-def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
+def path2dataset_info(d: Dict) -> Tuple[Dict, Dict, Dict]:
     """
-    :return: 2-tuple of (dataset information for `config`, number of tokens for plot)
+    :return: 3-tuple of (
+        dataset label information per split for `config`,
+        dataset token information per dataset for `config`,
+        number of tokens for plot
+    )
     """
     path = os.path.join(path_dset, f'{d["path"]}.{ext}')
     with open(path) as fl:
@@ -179,28 +190,25 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
         n_multi_label = sum([len(lbs_) > 1 for lbs_ in dset.values()])
         txt_n_toks, lb_n_toks = dict(), dict()
         for mode in tokenize_modes:
-            # txt_n_toks_, lb_n_toks_ = np.empty(n_text_, dtype=int), np.empty(n_pair_, dtype=int)
             n, desc_t, desc_l = 16, f'{split}-{mode}-text', f'{split}-{mode}-label'
             lb2tokenize_len = {lb: get_tokenizer_len(lb, mode) for lb in lbs_uniq}
 
-            # i = 0
-            # for t in tqdm(dset.keys(), total=len(dset), desc=f'{desc_t:>{n}}'):
-            #     txt_n_toks_[i] = get_tokenizer_len(t, mode)
-            #     i += 1
-            # i = 0
-            # for t in tqdm(dset.values(), desc=f'{desc_l:>{n}}'):
-            #     for lb in t:
-            #         lb_n_toks_[i] = lb2tokenize_len[lb]
-            #         i += 1
-            # txt_n_toks[mode], lb_n_toks[mode] = txt_n_toks_, lb_n_toks_
             counter_txt, counter_lb = Counter(), Counter()
-            for t in tqdm(dset.keys(), total=len(dset), desc=f'{desc_t:>{n}}'):
-                counter_txt[get_tokenizer_len(t, mode)] += 1
+            if mode == 're':
+                for t in tqdm(dset.keys(), total=len(dset), desc=f'{desc_t:>{n}}'):
+                    counter_txt[get_tokenizer_len(t, mode)] += 1
+            else:
+                batch_size = 2048*2
+                for grp in tqdm(
+                        group_n(dset.keys(), batch_size), total=math.ceil(len(dset) / batch_size), desc=f'{desc_t:>{n}}'
+                ):
+                    lens: List[int] = get_tokenizer_len(list(grp), mode)
+                    # from icecream import ic
+                    # ic(list(grp), lens)
+                    counter_txt.update(lens)
             for t in tqdm(dset.values(), desc=f'{desc_l:>{n}}'):
                 for lb in t:
                     counter_lb[lb2tokenize_len[lb]] += 1
-            # from icecream import ic
-            # ic(counter_txt, counter_lb)
             txt_n_toks[mode], lb_n_toks[mode] = counter_txt, counter_lb
         return dict(
             labels=sorted(lbs_uniq),
@@ -217,10 +225,6 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
     d_out = {split: split2info(split, dset) for split, dset in dsets.items()}  # Labels for each split
     assert all(split in ['train', 'test'] for split in d_out.keys())
     # sum over all splits of the dataset for token length computation
-    # txt_n_toks_all = [d_out.pop('txt_n_toks') for d_out in d_out.values()]
-    # lb_n_toks_all = [d_out.pop('lb_n_toks') for d_out in d_out.values()]
-    # txt_n_toks_all = {mode: np.concatenate([toks[mode] for toks in txt_n_toks_all]) for mode in tokenize_modes}
-    # lb_n_toks_all = {mode: np.concatenate([toks[mode] for toks in lb_n_toks_all]) for mode in tokenize_modes}
     txt_n_toks_all = [d_out.pop('txt_n_toks') for d_out in d_out.values()]
     lb_n_toks_all = [d_out.pop('lb_n_toks') for d_out in d_out.values()]
     txt_n_toks_all = {mode: sum([c[mode] for c in txt_n_toks_all], start=Counter()) for mode in tokenize_modes}
@@ -229,14 +233,12 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict]:
     def counter2mean(c: Counter) -> float:
         lens, counts = zip(*c.items())
         return np.average(lens, weights=counts)
-    # avg_toks = {f'{mode}-txt_avg_tokens': txt_n_toks_all[mode].mean() for mode in tokenize_modes} | \
-    #            {f'{mode}-lb_avg_tokens': lb_n_toks_all[mode].mean() for mode in tokenize_modes}
     avg_toks = {f'{mode}-txt_avg_tokens': counter2mean(txt_n_toks_all[mode]) for mode in tokenize_modes} | \
                {f'{mode}-lb_avg_tokens': counter2mean(lb_n_toks_all[mode]) for mode in tokenize_modes}
     assert set(labels) == set().union(*[set(d['labels']) for d in d_out.values()])
     if d['eval_labels_same']:
         assert d_out['train']['labels'] == d_out['test']['labels']
-    return d_out | avg_toks, dict(text=txt_n_toks_all, label=lb_n_toks_all)
+    return d_out, avg_toks, dict(text=txt_n_toks_all, label=lb_n_toks_all)
 
 
 def extract_utcd_meta() -> Dict:
@@ -245,8 +247,9 @@ def extract_utcd_meta() -> Dict:
     d_n_toks = dict()
     for dnm, d_dset in d_dsets.items():
         logger.info(f'Processing {logi(dnm)}... ')
-        d_meta, d_n_toks[dnm] = path2dataset_info(d_dset)
-        d_dset.update(dict(splits=d_meta))
+        d_meta, d_avg_tok, d_n_toks[dnm] = path2dataset_info(d_dset)
+        d_dset['splits'] = d_meta
+        d_dset.update(d_avg_tok)
 
     dnms = sorted(d_dsets)  # All datasets, in- and out-of-domain, share the same dataset <=> id mapping
     config['UTCD']['dataset_name2id'] = {dnm: i for i, dnm in enumerate(dnms)}
@@ -300,14 +303,7 @@ def plot_utcd_n_toks(d_n_toks: Dict, save=True):
             counter = d_n_toks[dnm][text_type][mode]
             lens, counts = zip(*counter.items())
             return [(l, c, dnm) for l, c in zip(lens, counts)]
-
-        # dnm2n_tok_count = {dnm: d_n_toks[dnm][text_type][mode] for dnm in d_n_toks.keys()}
         toks_unrolled = sum([dnm2dset(dnm) for dnm in d_n_toks.keys()], start=[])
-        # dnm2n_tok = OrderedDict((dnm, d_n_toks[dnm][text_type][mode]) for dnm in d_n_toks.keys())
-        # d_df[(text_type, mode)] = pd.DataFrame(dict(
-        #     n_token=np.concatenate(list(dnm2n_tok.values())),
-        #     dataset_name=sum([[dnm] * len(n_toks) for dnm, n_toks in dnm2n_tok.items()], start=[])
-        # ))
         # `count` is a pd.DataFrame specific attribute
         d_df[(text_type, mode)] = pd.DataFrame(toks_unrolled, columns=['n_token', 'counts', 'dataset_name'])
 
@@ -318,32 +314,31 @@ def plot_utcd_n_toks(d_n_toks: Dict, save=True):
         logger.info(f'Plotting {logi(text_type)} with {logi(mode)} tokenization')
         ax = axes[i_row, i_col]
         df = d_df[(text_type, mode)]
-        # n_bin = df.n_token.max() - df.n_token.min() + 1
         legend = i_row == 0 and i_col == 0
         sns.histplot(
             data=df, x='n_token', hue='dataset_name', kde=text_type == 'text', discrete=True, weights='counts',
-            # bins=n_bin,
             palette='husl',
             legend=legend, common_norm=False, ax=ax, stat='density'
         )
+        ax.set(xlabel=None, ylabel=None)
         ax.set_title(f'{text_type} with {mode} tokenization')
         if text_type == 'text':  # empirical, cos there are outliers for `text`s
             p = norm().cdf(3)  # quantile at 3std
             mi, ma = df.n_token.min(), math.ceil(df.n_token.quantile(p))
-            # from icecream import ic
-            # ic(df.n_token, df.counts)
             ma = weighted_quantile(df.n_token, [p], sample_weight=df.counts)[0]
             ax.set_xlim([mi, ma])
         else:
             xticks = ax.get_xticks()
             ax.set_xticks(list(range(math.floor(xticks.min()), math.ceil(xticks.max()) + 1)))
-    title, xlabel = 'Histogram of #tokens per sequence', '#token'
+    title = 'Histogram of #tokens per sequence'
     plt.suptitle(title)
-    plt.xlabel(xlabel)
-    plt.ylabel('count')
     plt.suptitle('Tokenization length distribution across datasets')
+    fig.supxlabel('#token')
+    fig.supylabel('density')
     if save:
-        plt.savefig(os.path.join(PATH_BASE, DIR_PROJ, 'chore', 'plot', f'{title}, {now(for_path=True)}.png'), dpi=300)
+        output_dir = os.path.join(PATH_BASE, DIR_PROJ, 'chore', 'plot')
+        os.makedirs(output_dir, exist_ok=True)
+        plt.savefig(os.path.join(output_dir, f'{title}, {now(for_path=True)}.png'), dpi=300)
     else:
         plt.show()
 

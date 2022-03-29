@@ -1,4 +1,5 @@
-from .util import *
+# from .util import *
+from zeroshot_encoder.util.util import *
 
 
 def get_output_base():
@@ -132,15 +133,18 @@ def get_utcd_info() -> pd.DataFrame:
     """
     Metadata about each dataset in UTCD
     """
+    k_avg_tok = [f'{mode}-{text_type}_avg_tokens' for text_type in ['txt', 'lb'] for mode in ['re', 'bert', 'gpt2']]
     infos = [
         dict(dataset_name=dnm, aspect=d_dset['aspect'], out_of_domain=d_dset['out_of_domain'])
         | {f'{split}-{k}': v for split, d_info in d_dset['splits'].items() for k, v in d_info.items()}
+        | {k: d_dset[k] for k in k_avg_tok}
         for dnm, d_dset in config('UTCD.datasets').items()
     ]
     return pd.DataFrame(infos)
 
 
 if __name__ == '__main__':
+    from icecream import ic
 
     def sanity_check(dsets_nm):
         path = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', dsets_nm)
@@ -162,10 +166,10 @@ if __name__ == '__main__':
         sanity_check('UTCD-ood')
     # get_utcd_ood()
 
-    process_utcd_dataset(in_domain=True, join=False, group_labels=False)
-    process_utcd_dataset(in_domain=False, join=False, group_labels=False)
-    process_utcd_dataset(in_domain=True, join=False, group_labels=True)
-    process_utcd_dataset(in_domain=False, join=False, group_labels=True)
+    # process_utcd_dataset(in_domain=True, join=False, group_labels=False)
+    # process_utcd_dataset(in_domain=False, join=False, group_labels=False)
+    # process_utcd_dataset(in_domain=True, join=False, group_labels=True)
+    # process_utcd_dataset(in_domain=False, join=False, group_labels=True)
 
     def sanity_check_ln_eurlex():
         path = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed', 'multi_eurlex')
@@ -178,5 +182,5 @@ if __name__ == '__main__':
     def output_utcd_info():
         df = get_utcd_info()
         ic(df)
-        df.to_csv(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'utcd-info.csv'))
-    # output_utcd_info()
+        df.to_csv(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'utcd-info.csv'), float_format='%.3f')
+    output_utcd_info()
