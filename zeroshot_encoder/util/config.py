@@ -93,14 +93,14 @@ config = {
                 path='UTCD/in-domain/sentiment_tweets_2020', aspect='sentiment',
                 eval_labels_same=True, out_of_domain=False
             ),
-            # clinc_150=dict(
-            #     path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
-            # # `eval_labels_same` := has some unique test labels
-            # sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            # slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
-            # ag_news=dict(path='UTCD/in-domain/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
-            # dbpedia=dict(path='UTCD/in-domain/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
-            # yahoo=dict(path='UTCD/in-domain/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            clinc_150=dict(
+                path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, out_of_domain=False),
+            # `eval_labels_same` := has some unique test labels
+            sgd=dict(path='UTCD/in-domain/sgd', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            slurp=dict(path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, out_of_domain=False),
+            ag_news=dict(path='UTCD/in-domain/ag_news', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            dbpedia=dict(path='UTCD/in-domain/dbpedia', aspect='topic', eval_labels_same=True, out_of_domain=False),
+            yahoo=dict(path='UTCD/in-domain/yahoo', aspect='topic', eval_labels_same=True, out_of_domain=False),
             # Out-of-domain datasets: test split intended to evaluation
             # TODO: until new multi-label format supported
             # amazon_polarity=dict(
@@ -203,8 +203,6 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict, Dict]:
                         group_n(dset.keys(), batch_size), total=math.ceil(len(dset) / batch_size), desc=f'{desc_t:>{n}}'
                 ):
                     lens: List[int] = get_tokenizer_len(list(grp), mode)
-                    # from icecream import ic
-                    # ic(list(grp), lens)
                     counter_txt.update(lens)
             for t in tqdm(dset.values(), desc=f'{desc_l:>{n}}'):
                 for lb in t:

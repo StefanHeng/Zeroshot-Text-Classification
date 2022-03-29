@@ -246,7 +246,7 @@ def log(s, c: str = 'log', c_time='green', as_str=False, bold=False):
         print(f'{c}{log(now(), c=c_time, as_str=True)}| {s}{log.reset}')
 
 
-def log_s(s, c, bold = False):
+def log_s(s, c, bold: bool = False):
     return log(s, c=c, as_str=True, bold=bold)
 
 
