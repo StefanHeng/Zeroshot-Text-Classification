@@ -1,4 +1,3 @@
-# from .util import *
 from zeroshot_encoder.util.util import *
 
 
@@ -42,13 +41,12 @@ def process_utcd_dataset(in_domain=True, join=False):
 
         def json2dset(split: str, dset: Dict[str, List[str]]) -> Union[datasets.Dataset, pd.DataFrame]:
             assert split in ['train', 'test']
-            lbs_: List[str] = config(f'UTCD.datasets.{dnm}.splits.{split}.labels')
-            # index is label per `lbs_` ordering, same with `datasets.ClassLabel`
-            lb2id = {lb: i for i, lb in enumerate(lbs_)}
-            # Map to integer labels
             if join:  # will convert to global integers later, see below
                 return pd.DataFrame([dict(text=txt, labels=lbs) for txt, lbs in dset.items()])
-            else:
+            else:  # TODO: didn't test
+                lbs_: List[str] = config(f'UTCD.datasets.{dnm}.splits.{split}.labels')
+                # Map to **local** integer labels; index is label per `lbs_` ordering, same with `datasets.ClassLabel`
+                lb2id = {lb: i for i, lb in enumerate(lbs_)}
                 # if not multi-label, `Sequence` of single element
                 df = pd.DataFrame([dict(text=txt, labels=[lb2id[lb] for lb in lbs]) for txt, lbs in dset.items()])
                 length = -1 if config(f'UTCD.datasets.{dnm}.splits.{split}.multi_label') else 1
@@ -66,7 +64,6 @@ def process_utcd_dataset(in_domain=True, join=False):
         # Global label across all datasets, all splits
         # Needed for inversely mapping to local label regardless of joined split, e.g. train/test,
         #   in case some label only in certain split
-        # lbs_global = sorted(set(join_its(df.labels.unique() for dsets in d_dsets.values() for df in dsets.values())))
         lbs_global = [
             config(f'UTCD.datasets.{dnm}.splits.{split}.labels')
             for dnm in d_dsets.keys() for split in ['train', 'test']
