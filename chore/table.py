@@ -1,7 +1,6 @@
 import csv
-from typing import Callable
 
-from zeroshot_encoder.util import *
+from chore.util import *
 
 
 def summaries2table_row(summaries: List[Dict], exp='latex', acc_only: bool = True) -> Union[str, List[str]]:
@@ -45,26 +44,34 @@ if __name__ == '__main__':
         for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand'), ('gpt2-nvidia', 'NA')]:
             summaries = dataset_acc_summary(DNMS_IN, dnm2csv_path=get_dnm2csv_path_fn(model_name, strategy))
             print(summaries2table_row(summaries, exp='csv'))
-    get_latex_table_row()
+    # get_latex_table_row()
 
-    def get_csv(dataset_names: Iterable[str]):
+    def get_csv(domain: str = 'in'):
+        assert domain in ['in', 'out']
+        dnms = DNMS_IN if domain == 'in' else DNMS_OUT
         with open(os.path.join(
-                PATH_BASE_CHORE, 'table', f'in-domain classification accuracy, {now(sep="-")}.csv'
+                PATH_BASE_CHORE, 'table', f'in-domain classification accuracy, {now(for_path=True)}.csv'
         ), 'w') as f:
             writer = csv.writer(f)
 
             writer.writerow([''] * 2 + sum(([aspect] * 3 for aspect in ('emotion', 'intent', 'topic')), start=[]))
-            writer.writerow(['model', 'sampling strategy'] + DNMS_IN)
+            writer.writerow(['model', 'sampling strategy'] + dnms)
 
-            setups = [
+            setups_in = [
                 ('binary-bert', 'rand'), ('binary-bert', 'vect'),
                 ('bert-nli', 'rand'), ('bert-nli', 'vect'),
                 ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
                 ('gpt2-nvidia', 'NA')
             ]
-            for model_name, strategy in setups:
-                fn = get_dnm2csv_path_fn(model_name, strategy)
-                summaries = dataset_acc_summary(dataset_names, dnm2csv_path=fn)
+            setups_out = [
+                ('binary-bert', 'rand'),
+                ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+                ('bi-encoder', 'rand'), ('bi-encoder', 'vect'),
+                ('gpt2-nvidia', 'NA')
+            ]
+            for model_name, strategy in (setups_in if domain == 'in' else setups_out):
+                fn = get_dnm2csv_path_fn(model_name, strategy, in_domain=domain == 'in')
+                summaries = dataset_acc_summary(dnms, dnm2csv_path=fn)
                 model_name, strategy = md_nm_n_strat2str_out(model_name, strategy)
                 writer.writerow([model_name, strategy] + summaries2table_row(summaries, exp='csv'))
-    # get_csv(DNMS)
+    get_csv(domain='out')

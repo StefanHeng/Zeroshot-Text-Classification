@@ -29,8 +29,7 @@ def process_utcd_dataset(in_domain=True, join=False):
     ext = config('UTCD.dataset_ext')
     path_dsets = os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET)
     path_out = os.path.join(get_output_base(), DIR_PROJ, DIR_DSET, 'processed')
-    logger.info(f'Processing UTCD datasets with '
-                f'{log_dict(dict(in_domain=in_domain, join=join))}... ')
+    logger.info(f'Processing UTCD datasets with {log_dict(dict(in_domain=in_domain, join=join))}... ')
 
     def path2dsets(dnm: str, d_dset: Dict) -> Union[datasets.DatasetDict, Dict[str, pd.DataFrame]]:
         logger.info(f'Processing dataset {logi(dnm)}... ')
