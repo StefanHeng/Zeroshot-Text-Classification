@@ -320,17 +320,16 @@ def plot_utcd_n_toks(d_n_toks: Dict, save=True):
         ax.set_title(f'{text_type} with {mode} tokenization')
         if text_type == 'text':  # empirical, cos there are outliers for `text`s
             p = norm().cdf(3)  # quantile at 3std
-            mi, ma = df.n_token.min(), math.ceil(df.n_token.quantile(p))
+            mi = df.n_token.min()
             ma = weighted_quantile(df.n_token, [p], sample_weight=df.counts)[0]
             ax.set_xlim([mi, ma])
         else:
             xticks = ax.get_xticks()
             ax.set_xticks(list(range(math.floor(xticks.min()), math.ceil(xticks.max()) + 1)))
-    title = 'Histogram of #tokens per sequence'
+    title = 'Tokenization length distribution across datasets'
     plt.suptitle(title)
-    plt.suptitle('Tokenization length distribution across datasets')
     fig.supxlabel('#token')
-    fig.supylabel('density')
+    fig.supylabel('Density')
     if save:
         output_dir = os.path.join(PATH_BASE, DIR_PROJ, 'chore', 'plot')
         os.makedirs(output_dir, exist_ok=True)

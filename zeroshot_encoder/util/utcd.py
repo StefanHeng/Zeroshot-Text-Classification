@@ -167,7 +167,7 @@ if __name__ == '__main__':
     # sanity_check('UTCD-in')
 
     def get_utcd_in():
-        process_utcd_dataset(join=True)
+        process_utcd_dataset(domain='in', join=True)
         sanity_check('UTCD-in')
     get_utcd_in()
 

@@ -10,6 +10,7 @@ import itertools
 import configparser
 import concurrent.futures
 from typing import Union, Tuple, List, Dict, Iterable, TypeVar, Callable
+from pygments import highlight, lexers, formatters
 from functools import reduce
 from collections import OrderedDict
 
@@ -285,6 +286,24 @@ def log_dict_nc(d: Dict = None, **kwargs) -> str:
     return log_dict(d, with_color=False, **kwargs)
 
 
+def log_dict_id(d: Dict) -> str:
+    """
+    Indented dict
+    """
+    return json.dumps(d, indent=4)
+
+
+def log_dict_pg(d: Dict) -> str:
+    return highlight(log_dict_id(d), lexers.JsonLexer(), formatters.TerminalFormatter())
+
+
+def log_dict_p(d: Dict, **kwargs) -> str:
+    """
+    for path
+    """
+    return log_dict(d, with_color=False, sep='=', **kwargs)
+
+
 def hex2rgb(hx: str) -> Union[Tuple[int], Tuple[float]]:
     # Modified from https://stackoverflow.com/a/62083599/10732321
     if not hasattr(hex2rgb, 'regex'):
@@ -402,11 +421,11 @@ def get_logger(name: str, typ: str = 'stdout', file_path: str = None) -> logging
     :param file_path: File path for file-write logging
     """
     assert typ in ['stdout', 'file-write']
-    logger = logging.getLogger(name)
+    logger = logging.getLogger(f'{name} file write' if typ == 'file-write' else name)
     logger.handlers = []  # A crude way to remove prior handlers, ensure only 1 handler per logger
     logger.setLevel(logging.DEBUG)
     if typ == 'stdout':
-        handler = logging.StreamHandler(stream=sys.stdout)  # For my own coloring
+        handler = logging.StreamHandler(stream=sys.stdout)  # stdout for my own coloring
     else:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         handler = logging.FileHandler(file_path)
@@ -464,9 +483,4 @@ if __name__ == '__main__':
     # lg = get_logger('test-lang')
     # ic(lg, type(lg))
 
-    lst = []
-    ic(list(join_it(lst, 'n')))
-    lst = [1]
-    ic(list(join_it(lst, 'n')))
-    lst = [1, 2, 3]
-    ic(list(join_it(lst, 'n')))
+    pass
