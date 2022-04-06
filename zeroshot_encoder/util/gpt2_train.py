@@ -57,7 +57,7 @@ class MyLoggingCallback(TrainerCallback):
         if torch.cuda.is_available() and self.trainer.args.n_gpu > 1:
             self.bsz *= self.trainer.args.n_gpu
         seq_max_len = len(dset_tr__[0]['input_ids'])
-        n_data, md_sz = len(dset_tr__), md_.config.n_positions
+        n_data, md_sz = len(dset_tr__), md_.config_dict.n_positions
         self.n_step = max(math.ceil(n_data / self.bsz), 1) * n_ep  # #step/epoch at least 1
         self.train_meta = OrderedDict([
             ('#data', n_data), ('model size', md_sz),
@@ -114,7 +114,7 @@ class MyLoggingCallback(TrainerCallback):
             n_eval = len(dset_vl)
             bsz = dl_vl.batch_size
             seq_max_len = len(dset_vl[0]['input_ids'])
-            md_sz = model.config.n_positions
+            md_sz = model.config_dict.n_positions
             n_bch = max(math.ceil(n_eval / bsz), 1)
             eval_meta = OrderedDict([
                 ('#data', n_eval), ('model size', md_sz), ('batch shape', (bsz, seq_max_len)), ('#batches', n_bch)
@@ -504,7 +504,7 @@ class CustomTrainer(Trainer):
         inputs = self._prepare_inputs(inputs)
         if ignore_keys is None:
             if hasattr(self.model, "config"):
-                ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
+                ignore_keys = getattr(self.model.config_dict, "keys_to_ignore_at_inference", [])
             else:
                 ignore_keys = []
 

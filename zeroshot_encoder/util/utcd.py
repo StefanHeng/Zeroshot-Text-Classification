@@ -2,7 +2,7 @@ import gdown
 from zipfile import ZipFile
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 
-from zeroshot_encoder.util.util import *
+from zeroshot_encoder.util import *
 
 
 def get_output_base():
@@ -142,7 +142,7 @@ def get_utcd_info() -> pd.DataFrame:
     """
     k_avg_tok = [f'{mode}-{text_type}_avg_tokens' for text_type in ['txt', 'lb'] for mode in ['re', 'bert', 'gpt2']]
     infos = [
-        dict(dataset_name=dnm, aspect=d_dset['aspect'], out_of_domain=d_dset['out_of_domain'])
+        dict(dataset_name=dnm, aspect=d_dset['aspect'], domain=d_dset['domain'])
         | {f'{split}-{k}': v for split, d_info in d_dset['splits'].items() for k, v in d_info.items()}
         | {k: d_dset[k] for k in k_avg_tok}
         for dnm, d_dset in config('UTCD.datasets').items()
@@ -169,7 +169,7 @@ if __name__ == '__main__':
     def get_utcd_in():
         process_utcd_dataset(domain='in', join=True)
         sanity_check('UTCD-in')
-    get_utcd_in()
+    # get_utcd_in()
 
     def get_utcd_ood():
         process_utcd_dataset(domain='in', join=True)
@@ -191,4 +191,4 @@ if __name__ == '__main__':
         df = get_utcd_info()
         ic(df)
         df.to_csv(os.path.join(PATH_BASE, DIR_PROJ, DIR_DSET, 'utcd-info.csv'), float_format='%.3f')
-    # output_utcd_info()
+    output_utcd_info()

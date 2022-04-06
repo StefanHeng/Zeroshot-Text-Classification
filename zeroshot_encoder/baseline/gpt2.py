@@ -720,7 +720,7 @@ def evaluate_trained(in_domain: bool = True, batch_size: int = 48, n_ep: int = 3
     Run evaluation, on potentially multi-label datasets
     """
     model = load_trained(epoch=n_ep).to('cuda')
-    conf, model_cnm = model.config, model.__class__.__qualname__
+    conf, model_cnm = model.config_dict, model.__class__.__qualname__
     # To disable warning `Setting `pad_token_id` to `eos_token_id` for open-end generation.`
     model_size = conf.max_length = conf.n_ctx
     conf.pad_token_id = conf.eos_token_id
