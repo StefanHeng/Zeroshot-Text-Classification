@@ -38,7 +38,7 @@ class TrainPlot:
         self.title_plot = rf'{title}, $n={n_data}$, #position = ${md_sz}$ ' \
                           + rf'$\alpha = {lr}$, batch shape=${bsz}$, #epochs=${n_ep}$, #steps=${n_step}$'
         self.title_save = f'{title}, n={n_data}, l={md_sz}, a={lr}, bsz={bsz}, ' \
-                          f'n_ep={n_ep}, n_stp={n_step}, {now(sep="-")}'
+                          f'n_ep={n_ep}, n_stp={n_step}, {now(for_path=True)}'
 
     def make_plot(self):
         fig, self.axes = plt.subplots(3, 1, figsize=(16, 9))

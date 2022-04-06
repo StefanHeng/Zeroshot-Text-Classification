@@ -1,4 +1,3 @@
-import os
 from collections import Counter
 
 from scipy.stats import norm
@@ -244,8 +243,6 @@ def extract_utcd_meta() -> Dict:
     d_n_toks = dict()
     for dnm, d_dset in d_dsets.items():
         logger.info(f'Processing {logi(dnm)}... ')
-        # from icecream import ic
-        # ic(d_dset)
         if d_dset['domain'] == 'in':
             d_meta, d_avg_tok, d_n_toks[dnm] = path2dataset_info(d_dset)
             d_dset['splits'] = d_meta

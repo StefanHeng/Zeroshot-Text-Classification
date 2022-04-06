@@ -101,7 +101,7 @@ class MyLoggingCallback(TrainerCallback):
 
     def on_train_begin(self, args: TrainingArguments, state, control, **kwargs):
         if self.trainer.is_local_process_zero():  # For distributed training; TODO: support multi machine?
-            self.log_fnm = self.log_fnm_tpl.format(now(sep='-'))
+            self.log_fnm = self.log_fnm_tpl.format(now(for_path=True))
             self._update_log_handler(f'train, {self.log_fnm}.log')
 
             self.logger.info(f'Training started with {log_dict(self.train_meta)}')

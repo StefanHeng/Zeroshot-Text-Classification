@@ -16,7 +16,6 @@ from collections import OrderedDict
 import numpy as np
 import pandas as pd
 import torch
-import datasets
 import matplotlib.pyplot as plt
 import seaborn as sns
 import colorama
@@ -48,11 +47,24 @@ T = TypeVar('T')
 K = TypeVar('K')
 
 
-def join_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
+def chain_its(its: Iterable[Iterable[T]]) -> Iterable[T]:
     out = itertools.chain()
     for it in its:
         out = itertools.chain(out, it)
     return out
+
+
+def join_it(it: Iterable[T], sep: T) -> Iterable[T]:
+    it = iter(it)
+
+    curr = next(it, None)
+    if curr is not None:
+        yield curr
+        curr = next(it, None)
+    while curr is not None:
+        yield sep
+        yield curr
+        curr = next(it, None)
 
 
 def group_n(it: Iterable[T], n: int) -> Iterable[Tuple[T]]:
@@ -451,3 +463,10 @@ if __name__ == '__main__':
 
     # lg = get_logger('test-lang')
     # ic(lg, type(lg))
+
+    lst = []
+    ic(list(join_it(lst, 'n')))
+    lst = [1]
+    ic(list(join_it(lst, 'n')))
+    lst = [1, 2, 3]
+    ic(list(join_it(lst, 'n')))
