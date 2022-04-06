@@ -173,7 +173,7 @@ if __name__ == '__main__':
     # get_utcd_in()
 
     def get_utcd_out():
-        # process_utcd_dataset(domain='out', join=True)
+        process_utcd_dataset(domain='out', join=True)
         sanity_check('UTCD-out')
     get_utcd_out()
 
