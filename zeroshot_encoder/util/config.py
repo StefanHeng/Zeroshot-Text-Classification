@@ -179,13 +179,6 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict, Dict]:
     def split2info(split, dset: Dict[str, List[str]], count_token_length: bool = True) -> Dict:
         # Based on heuristics on how the `json` are stored
         # creating a list of all the strings consume memory for prohibitively large datasets
-        # subset_keys = set()  # TODO: debugging
-        # for i, k in enumerate(dset.keys()):
-        #     subset_keys.add(k)
-        #     if i >= 1024:
-        #     # if i >= 10:
-        #         break
-        # dset = {k: dset[k] for k in subset_keys}
         n_text_, n_pair_ = len(dset.keys()), sum([len(lbs) for lbs in dset.values()])
         lbs_uniq = set().union(*dset.values())
         n_multi_label = sum([len(lbs_) > 1 for lbs_ in dset.values()])
@@ -234,8 +227,6 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict, Dict]:
     lb_n_toks_all = [d_out.pop('lb_n_toks') for d_out in d_out.values()]
     txt_n_toks_all = [e for e in txt_n_toks_all if e]  # pop from the dict, then remove them for stats
     lb_n_toks_all = [e for e in lb_n_toks_all if e]
-    # from icecream import ic
-    # ic(txt_n_toks_all)
     txt_n_toks_all = {mode: sum([c[mode] for c in txt_n_toks_all], start=Counter()) for mode in tokenize_modes}
     lb_n_toks_all = {mode: sum([c[mode] for c in lb_n_toks_all], start=Counter()) for mode in tokenize_modes}
 
@@ -244,9 +235,9 @@ def path2dataset_info(d: Dict) -> Tuple[Dict, Dict, Dict]:
         return np.average(lens, weights=counts)
     avg_toks = {f'{mode}-txt_avg_tokens': counter2mean(txt_n_toks_all[mode]) for mode in tokenize_modes} | \
                {f'{mode}-lb_avg_tokens': counter2mean(lb_n_toks_all[mode]) for mode in tokenize_modes}
-    # assert set(labels) == set().union(*[set(d['labels']) for d in d_out.values()])  # TODO: debugging
-    # if d['eval_labels_same']:
-    #     assert d_out['train']['labels'] == d_out['test']['labels']
+    assert set(labels) == set().union(*[set(d['labels']) for d in d_out.values()])
+    if d['eval_labels_same']:
+        assert d_out['train']['labels'] == d_out['test']['labels']
     return d_out, avg_toks, dict(text=txt_n_toks_all, label=lb_n_toks_all)
 
 
@@ -322,35 +313,6 @@ def plot_utcd_n_toks(d_n_toks: Dict, domain: str, save=True):
         ax = axes[i_row, i_col]
         df = d_df[(text_type, mode)]
         legend = i_row == 0 and i_col == 0
-        # from icecream import ic
-        # ic(i_row, i_col)
-        # # ic(df)
-        # legend = i_row == 0 and i_col == 0
-        # # sns.histplot(
-        # #     data=df, x='n_token', ax=ax
-        # # )
-        # mi = df.n_token.min()
-        # if text_type == 'text':  # empirical, cos there are outliers for `text`s
-        #     p = norm().cdf(3)  # quantile at 3std
-        #     # too much patches in the plot already
-        #     ma = min(round(weighted_quantile(df.n_token, [p], sample_weight=df.counts)[0]), 1024)
-        # else:
-        #     ma = df.n_token.max()
-        # ic(mi, ma, text_type)
-        # sns.histplot(
-        #     data=df, x='n_token',
-        #     hue='dataset_name',
-        #     kde=text_type == 'text',
-        #     # bins=ma-mi+1,
-        #     # binwidth=1,
-        #     discrete=True,  # too much patches for out-of-domain plots given text length
-        #     weights='counts',
-        #     palette='husl',
-        #     legend=legend,
-        #     common_norm=False,
-        #     stat='density',
-        #     ax=ax,
-        # )
         sns.histplot(
             data=df, x='n_token', hue='dataset_name', weights='counts',
             kde=text_type == 'text', discrete=True, common_norm=False, stat='density',
@@ -381,13 +343,10 @@ def plot_utcd_n_toks(d_n_toks: Dict, domain: str, save=True):
 
 d_n_tok = extract_utcd_meta()
 # for dom in ['in', 'out']:
-# for dom in ['out', 'in']:
 for dom in ['in']:
-    # plot only in-domain data as out-of-domain tokens lengths
-    # cos prohibitively large # of patches for bar-plot to terminate soon
+    # plot only in-domain data as out-of-domain tokens lengths are too long,
+    # resulting in prohibitively large # of patches for bar-plot to terminate soon
     d_n_tok_ = {dnm: v for dnm, v in d_n_tok.items() if get(config_dict, f'UTCD.datasets.{dnm}.domain') == dom}
-    # from icecream import ic
-    # ic(d_n_tok_)
     plot_utcd_n_toks(d_n_tok_, domain=dom, save=True)
 
 
