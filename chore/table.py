@@ -70,7 +70,7 @@ if __name__ == '__main__':
                 ('gpt2-nvidia', 'NA')
             ]
             for model_name, strategy in (setups_in if domain == 'in' else setups_out):
-                fn = get_dnm2csv_path_fn(model_name, strategy, in_domain=domain == 'in')
+                fn = get_dnm2csv_path_fn(model_name, strategy, domain=domain == 'in')
                 summaries = dataset_acc_summary(dnms, dnm2csv_path=fn)
                 model_name, strategy = md_nm_n_strat2str_out(model_name, strategy)
                 writer.writerow([model_name, strategy] + summaries2table_row(summaries, exp='csv'))

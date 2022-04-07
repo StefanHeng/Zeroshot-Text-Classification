@@ -26,14 +26,16 @@ D_DNMS = {
     'out-of-domain': OrderedDict([
         ('sentiment', ['amazon_polarity', 'finance_sentiment', 'yelp']),
         ('intent', ['banking77', 'snips', 'nlu_evaluation']),
-        ('topic', ['arxiv', 'patent', 'consumer_finance'])
+        ('topic', ['multi_eurlex', 'patent', 'consumer_finance'])
     ])
 }
 DNMS_IN = sum(D_DNMS['in-domain'].values(), start=[])
 DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 
 
-def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Callable:
+def get_dnm2csv_path_fn(model_name: str, strategy: str, domain: str = 'in') -> Callable:
+    domains = ['in', 'out']
+    assert domain in domains, f'Unexpected domain: expect one of {domains}'
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
     assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'dual-bi-encoder', 'gpt2-nvidia']
     paths.append(model_name)
@@ -41,19 +43,18 @@ def get_dnm2csv_path_fn(model_name: str, strategy: str, in_domain=True) -> Calla
 
     if strategy == 'NA':  # GPT2
         assert model_name == 'gpt2-nvidia'
-        paths.extend(['in-domain', '2022-03-11 23-50-25'] if in_domain else ['out-of-domain', '2022-03-12 00-25-13'])
+        paths.extend(
+            ['in-domain', '2022-04-06_23-13-55'] if domain == 'in' else ['out-of-domain', '2022-04-06_23-43-19'])
     else:  # BERT models
         paths.extend([strategy, 'results'])
-        if in_domain:
-            if strategy == 'rand':
-                if model_name in ['binary-bert', 'bert-nli']:
-                    paths.append('in-domain, 03.24.22')
-                else:  # bi-encoder
-                    paths.append('in-domain, 03.26.22')
+        if strategy == 'rand':
+            if domain == 'in':
+                paths.append(
+                    'in-domain, 03.24.22' if model_name in ['binary-bert', 'bert-nli'] else 'in-domain, 03.26.22')
             else:
-                paths.append('in-domain')
+                paths.append('out-of-domain, 04.06.22')
         else:
-            paths.append('out-of-domain')
+            paths.append('in-domain' if domain else 'out-of-domain')
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 

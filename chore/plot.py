@@ -106,9 +106,11 @@ if __name__ == '__main__':
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
-    def plot_approaches_performance(setups: List[Tuple[str, str]], in_domain=True, save=False):
-        domain = 'in-domain' if in_domain else 'out-of-domain'
-        d_dnms = D_DNMS[domain]
+    def plot_approaches_performance(setups: List[Tuple[str, str]], domain: str = 'in', save=False):
+        domains = ['in', 'out']
+        assert domain in domains, f'Unexpected domain: expected one of {domains}, got {domain}'
+        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+        d_dnms = D_DNMS[domain_str]
         fig, axes = plt.subplots(1, len(d_dnms), figsize=(16, 6))
         # Ordered, uniq list names, for consistent color code between runs
         models = list(OrderedDict((md, None) for md, strat in setups))
@@ -118,16 +120,16 @@ if __name__ == '__main__':
         for ax, (aspect, dnms) in zip(axes, d_dnms.items()):
             for md_nm, strat in setups:
                 dnms_ = dnms
-                if aspect == 'topic':
-                    # TODO: some models had eval number for the new datasets already, swap only those for now
-                    if md_nm in ['bi-encoder', 'gpt2-nvidia'] or \
-                            (md_nm == 'bert-nli' and strat == 'vect') or \
-                            (md_nm == 'dual-bi-encoder' and strat == 'none'):
-                        dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
+                # if aspect == 'topic':
+                #     # TODO: some models had eval number for the new datasets already, swap only those for now
+                #     if md_nm in ['bi-encoder', 'gpt2-nvidia'] or \
+                #             (md_nm == 'bert-nli' and strat == 'vect') or \
+                #             (md_nm == 'dual-bi-encoder' and strat == 'none'):
+                #         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
                 scores = [
                     s['f1-score'] * 100  # As percentage
                     for s in dataset_acc_summary(
-                        dataset_names=dnms_, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, in_domain=in_domain)
+                        dataset_names=dnms_, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, domain=domain)
                     )
                 ]
                 dnm_ints = list(range(len(dnms_)))
@@ -138,10 +140,10 @@ if __name__ == '__main__':
                     label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
                 )
             dnm_ints = list(range(len(dnms)))
-            if aspect == 'topic' and not in_domain:  # TODO: remove
-                ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
-            else:
-                ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
+            # if aspect == 'topic' and domain == 'out':  # TODO: remove
+            #     ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
+            # else:
+            ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
@@ -152,7 +154,7 @@ if __name__ == '__main__':
             ma_, mi_ = float(edges_.max()), float(edges_.min())
             assert ma_.is_integer() and mi_.is_integer()
             ax.set_xlim([mi_-0.25, ma_+0.25])
-        title = f'Clasisifcation Accuracy - {domain} evaluation'
+        title = f'Clasisifcation Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
@@ -166,7 +168,7 @@ if __name__ == '__main__':
         ('binary-bert', 'rand'),
         ('bert-nli', 'rand'),
         ('bi-encoder', 'rand'),
-        ('dual-bi-encoder', 'none'),
+        # ('dual-bi-encoder', 'none'),
         ('gpt2-nvidia', 'NA')
     ]
     # plot_approaches_performance(save=True)
@@ -174,18 +176,19 @@ if __name__ == '__main__':
 
     setups_out = [
         ('binary-bert', 'rand'),
-        ('bert-nli', 'rand'), ('bert-nli', 'vect'),
+        ('bert-nli', 'rand'),
+        # ('bert-nli', 'vect'),
         ('bi-encoder', 'rand'),
-        ('dual-bi-encoder', 'none'),
+        # ('dual-bi-encoder', 'none'),
         ('gpt2-nvidia', 'NA'),
     ]
 
     def plot_in_domain():
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
-        plot_approaches_performance(setups_in, in_domain=True, save=True)
-    plot_in_domain()
+        plot_approaches_performance(setups_in, domain='in', save=True)
+    # plot_in_domain()
 
     def plot_out_of_domain():
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
-        plot_approaches_performance(setups_out, in_domain=False, save=True)
-    # plot_out_of_domain()
+        plot_approaches_performance(setups_out, domain='out', save=True)
+    plot_out_of_domain()
