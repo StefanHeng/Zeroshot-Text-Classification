@@ -1,6 +1,3 @@
-import os
-from typing import Callable
-
 from zeroshot_encoder.util import *
 
 
@@ -100,7 +97,7 @@ if __name__ == '__main__':
 
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
-        md_nm, strat = md_nm_n_strat2str_out(model_name, strategy)
+        md_nm, strat = prettier_model_name_n_sample_strategy(model_name, strategy)
         dir_save = os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in config('UTCD.datasets'):
@@ -117,7 +114,7 @@ if __name__ == '__main__':
             f'Unexpected train strategy: expected one of {logi(train_strats)}, got {logi(train_strategy)}'
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        d_dnms = D_DNMS[domain_str]
+        d_dnms = D_DATASET_NAMES[domain_str]
         fig, axes = plt.subplots(1, len(d_dnms), figsize=(16, 6))
         # Ordered, uniq list names, for consistent color code between runs
         models = list(OrderedDict((md, None) for md, strat in setups))
@@ -129,11 +126,11 @@ if __name__ == '__main__':
                 path = get_dnm2csv_path_fn(
                     model_name=md_nm, sample_strategy=sample_strat, train_strategy=train_strategy, domain=domain)
                 # As percentage
-                scores = [s['f1-score'] * 100 for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=path)]
+                scores = [s['f1-score'] * 100 for s in dataset_acc(dataset_names=dnms, dnm2csv_path=path)]
                 dnm_ints = list(range(len(dnms)))
                 ls = ':' if sample_strat == 'vect' else '-'
                 i_color = models.index(md_nm)
-                label = md_nm_n_strat2str_out(md_nm, sample_strat, pprint=True)
+                label = prettier_model_name_n_sample_strategy(md_nm, sample_strat, pprint=True)
                 ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
             dnm_ints = list(range(len(dnms)))
             ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
