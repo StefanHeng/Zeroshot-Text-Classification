@@ -1,3 +1,4 @@
+import os
 from typing import Callable
 
 from zeroshot_encoder.util import *
@@ -106,9 +107,15 @@ if __name__ == '__main__':
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
-    def plot_approaches_performance(setups: List[Tuple[str, str]], domain: str = 'in', save=False):
+    def plot_approaches_performance(
+            setups: List[Tuple[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False
+    ):
         domains = ['in', 'out']
         assert domain in domains, f'Unexpected domain: expected one of {domains}, got {domain}'
+        train_strats = ['vanilla', 'implicit', 'explicit']
+        assert train_strategy in train_strats, \
+            f'Unexpected train strategy: expected one of {logi(train_strats)}, got {logi(train_strategy)}'
+
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         d_dnms = D_DNMS[domain_str]
         fig, axes = plt.subplots(1, len(d_dnms), figsize=(16, 6))
@@ -118,31 +125,17 @@ if __name__ == '__main__':
         cs = sns.color_palette(palette='husl', n_colors=n_color)
 
         for ax, (aspect, dnms) in zip(axes, d_dnms.items()):
-            for md_nm, strat in setups:
-                dnms_ = dnms
-                # if aspect == 'topic':
-                #     # TODO: some models had eval number for the new datasets already, swap only those for now
-                #     if md_nm in ['bi-encoder', 'gpt2-nvidia'] or \
-                #             (md_nm == 'bert-nli' and strat == 'vect') or \
-                #             (md_nm == 'dual-bi-encoder' and strat == 'none'):
-                #         dnms_ = ['multi_eurlex' if dnm == 'arxiv' else dnm for dnm in dnms]
-                scores = [
-                    s['f1-score'] * 100  # As percentage
-                    for s in dataset_acc_summary(
-                        dataset_names=dnms_, dnm2csv_path=get_dnm2csv_path_fn(md_nm, strat, domain=domain)
-                    )
-                ]
-                dnm_ints = list(range(len(dnms_)))
-                line_style = ':' if strat == 'vect' else '-'
+            for md_nm, sample_strat in setups:
+                path = get_dnm2csv_path_fn(
+                    model_name=md_nm, sample_strategy=sample_strat, train_strategy=train_strategy, domain=domain)
+                # As percentage
+                scores = [s['f1-score'] * 100 for s in dataset_acc_summary(dataset_names=dnms, dnm2csv_path=path)]
+                dnm_ints = list(range(len(dnms)))
+                ls = ':' if sample_strat == 'vect' else '-'
                 i_color = models.index(md_nm)
-                ax.plot(
-                    dnm_ints, scores, c=cs[i_color], ls=line_style, lw=1, marker='.', ms=8,
-                    label=md_nm_n_strat2str_out(md_nm, strat, pprint=True)
-                )
+                label = md_nm_n_strat2str_out(md_nm, sample_strat, pprint=True)
+                ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
             dnm_ints = list(range(len(dnms)))
-            # if aspect == 'topic' and domain == 'out':  # TODO: remove
-            #     ax.set_xticks(dnm_ints, labels=['arxiv/\nmulti_eurlex', 'patent', 'consumer_finance'])
-            # else:
             ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
@@ -154,7 +147,7 @@ if __name__ == '__main__':
             ma_, mi_ = float(edges_.max()), float(edges_.min())
             assert ma_.is_integer() and mi_.is_integer()
             ax.set_xlim([mi_-0.25, ma_+0.25])
-        title = f'Clasisifcation Accuracy - {domain_str} evaluation'
+        title = f'{train_strategy.capitalize()} Training Clasisifcation Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
@@ -163,32 +156,40 @@ if __name__ == '__main__':
             plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
         else:
             plt.show()
-
-    setups_in = [
-        ('binary-bert', 'rand'),
-        ('bert-nli', 'rand'),
-        ('bi-encoder', 'rand'),
-        # ('dual-bi-encoder', 'none'),
-        ('gpt2-nvidia', 'NA')
-    ]
     # plot_approaches_performance(save=True)
     # plot_approaches_performance(setups_in, in_domain=True, save=False)
 
-    setups_out = [
-        ('binary-bert', 'rand'),
-        ('bert-nli', 'rand'),
-        # ('bert-nli', 'vect'),
-        ('bi-encoder', 'rand'),
-        # ('dual-bi-encoder', 'none'),
-        ('gpt2-nvidia', 'NA'),
-    ]
-
     def plot_in_domain():
+        setups = [
+            ('binary-bert', 'rand'),
+            ('bert-nli', 'rand'),
+            ('bi-encoder', 'rand'),
+            # ('dual-bi-encoder', 'none'),
+            ('gpt2-nvidia', 'NA')
+        ]
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
-        plot_approaches_performance(setups_in, domain='in', save=True)
+        plot_approaches_performance(setups, domain='in', save=True)
     # plot_in_domain()
 
     def plot_out_of_domain():
+        setups = [
+            ('binary-bert', 'rand'),
+            ('bert-nli', 'rand'),
+            # ('bert-nli', 'vect'),
+            ('bi-encoder', 'rand'),
+            # ('dual-bi-encoder', 'none'),
+            ('gpt2-nvidia', 'NA'),
+        ]
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
-        plot_approaches_performance(setups_out, domain='out', save=True)
-    plot_out_of_domain()
+        plot_approaches_performance(setups, domain='out', save=True)
+    # plot_out_of_domain()
+
+    def plot_in_implicit():
+        setups = [
+            ('binary-bert', 'rand'),
+            ('bert-nli', 'rand'),
+            ('bi-encoder', 'rand'),
+            # ('gpt2-nvidia', 'NA')
+        ]
+        plot_approaches_performance(setups, domain='in', train_strategy='implicit', save=True)
+    plot_in_implicit()

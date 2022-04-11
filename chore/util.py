@@ -33,28 +33,38 @@ DNMS_IN = sum(D_DNMS['in-domain'].values(), start=[])
 DNMS_OUT = sum(D_DNMS['out-of-domain'].values(), start=[])
 
 
-def get_dnm2csv_path_fn(model_name: str, strategy: str, domain: str = 'in') -> Callable:
+def get_dnm2csv_path_fn(
+        model_name: str, sample_strategy: str = 'rand', train_strategy: str = 'vanilla',
+        domain: str = 'in'
+) -> Callable:
     domains = ['in', 'out']
     assert domain in domains, f'Unexpected domain: expect one of {domains}'
     paths = [PATH_BASE, DIR_PROJ, 'evaluations']
     assert model_name in ['binary-bert', 'bert-nli', 'bi-encoder', 'dual-bi-encoder', 'gpt2-nvidia']
     paths.append(model_name)
-    assert strategy in ['rand', 'vect', 'none', 'NA']  # # Radnom negative sampling; word2vec average label selection
+    assert sample_strategy in ['rand', 'vect', 'none', 'NA']
 
-    if strategy == 'NA':  # GPT2
+    if sample_strategy == 'NA':  # GPT2
         assert model_name == 'gpt2-nvidia'
         paths.extend(
             ['in-domain', '2022-04-06_23-13-55'] if domain == 'in' else ['out-of-domain', '2022-04-06_23-43-19'])
     else:  # BERT models
-        paths.extend([strategy, 'results'])
-        if strategy == 'rand':
-            if domain == 'in':
-                paths.append(
-                    'in-domain, 03.24.22' if model_name in ['binary-bert', 'bert-nli'] else 'in-domain, 03.26.22')
+        paths.extend([f'{sample_strategy}, {train_strategy}'])
+        if train_strategy == 'vanilla':
+            if sample_strategy == 'rand':
+                if domain == 'in':
+                    paths.append(
+                        'in-domain, 03.24.22' if model_name in ['binary-bert', 'bert-nli'] else 'in-domain, 03.26.22')
+                else:
+                    paths.append('out-of-domain, 04.06.22')
             else:
-                paths.append('out-of-domain, 04.06.22')
+                paths.append('in-domain' if domain else 'out-of-domain')
         else:
-            paths.append('in-domain' if domain else 'out-of-domain')
+            assert train_strategy == 'implicit', 'explicit not implemented yet'
+            if domain == 'in':
+                paths.append('in-domain, 04.09.22')
+            else:
+                raise NotImplementedError('out-of-domain not created yet')
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 
