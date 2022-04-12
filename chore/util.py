@@ -11,12 +11,12 @@ def get_chore_base() -> str:
 class ChoreConfig:
     def __init__(self):
         d_dset_names = {
-            'in-domain': OrderedDict([
+            'in': OrderedDict([
                 ('sentiment', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
                 ('intent', ['sgd', 'clinc_150', 'slurp']),
                 ('topic', ['ag_news', 'dbpedia', 'yahoo'])
             ]),
-            'out-of-domain': OrderedDict([
+            'out': OrderedDict([
                 ('sentiment', ['amazon_polarity', 'finance_sentiment', 'yelp']),
                 ('intent', ['banking77', 'snips', 'nlu_evaluation']),
                 ('topic', ['multi_eurlex', 'patent', 'consumer_finance'])
@@ -24,30 +24,33 @@ class ChoreConfig:
         }
         d_dset_names_all = deepcopy(d_dset_names)
         # intended for writing out table, will write all the data
-        d_dset_names_all['out-of-domain']['topic'].insert(0, 'arxiv')  # the only difference
+        d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
         self.config_dict = {
-            'dataset-names': d_dset_names,
-            'dataset-names-all': d_dset_names_all,
+            'domain2aspect2dataset-names': d_dset_names,
+            'domain2aspect2dataset-names-all': d_dset_names_all,
             'domain2dataset-names': {  # syntactic sugar
-                'in': sum(d_dset_names['in-domain'].values(), start=[]),
-                'out': sum(d_dset_names['out-of-domain'].values(), start=[])
+                'in': sum(d_dset_names['in'].values(), start=[]),
+                'out': sum(d_dset_names['out'].values(), start=[])
             },
             'domain2dataset-names-all': {
-                'in': sum(d_dset_names_all['in-domain'].values(), start=[]),
-                'out': sum(d_dset_names_all['out-of-domain'].values(), start=[])
+                'in': sum(d_dset_names_all['in'].values(), start=[]),
+                'out': sum(d_dset_names_all['out'].values(), start=[])
             },
             'train-setup2dset-eval-path': OrderedDict([
                 (('binary-bert', 'rand', 'vanilla', 'in'), ['binary-bert', 'rand, vanilla', 'in-domain, 03.24.22']),
                 (('binary-bert', 'rand', 'vanilla', 'out'), [
                     'binary-bert', 'rand, vanilla', 'out-of-domain, 04.06.22']),
                 (('binary-bert', 'rand', 'implicit', 'in'), ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22']),
+                (('binary-bert', 'rand', 'implicit', 'out'), [
+                    'binary-bert', 'rand, implicit', 'out-of-domain, 04.11.22']),
                 (('binary-bert', 'vect', 'vanilla', 'in'), ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22']),
 
                 (('bert-nli', 'rand', 'vanilla', 'in'), ['bert-nli', 'rand, vanilla', 'in-domain, 03.24.22']),
                 (('bert-nli', 'rand', 'vanilla', 'out'), ['bert-nli', 'rand, vanilla', 'out-of-domain, 04.06.22']),
                 (('bert-nli', 'rand', 'implicit', 'in'), ['bert-nli', 'rand, implicit', 'in-domain, 04.09.22']),
+                (('bert-nli', 'rand', 'implicit', 'out'), ['bert-nli', 'rand, implicit', 'out-of-domain, 04.11.22']),
                 (('bert-nli', 'vect', 'vanilla', 'in'), ['bert-nli', 'vect, vanilla', 'in-domain, 03.05.22']),
-                (('bert-nli', 'vect', 'vanilla', 'out'), ['bert-nli', 'vect, vanilla', 'in-domain, 03.09.22']),
+                (('bert-nli', 'vect', 'vanilla', 'out'), ['bert-nli', 'vect, vanilla', 'out-of-domain, 03.09.22']),
 
                 (('bi-encoder', 'rand', 'vanilla', 'in'), ['bi-encoder', 'rand, vanilla', 'in-domain, 03.26.22']),
                 (('bi-encoder', 'rand', 'vanilla', 'out'), ['bi-encoder', 'rand, vanilla', 'out-of-domain, 04.06.22']),
@@ -117,10 +120,11 @@ def prettier_model_name_n_sample_strategy(
 
 
 def dataset_acc(
-        dataset_names: Iterable[str], dnm2csv_path: Callable = None, suppress_not_found: Union[bool, Any] = False,
+        dataset_names: Iterable[str], dnm2csv_path: Callable = None,
+        suppress_not_found: Union[bool, Any] = False, return_type: str = 'dict'
 ) -> Dict[str, Union[float, Any]]:
-    # from icecream import ic
-    # ic(dataset_names)
+    ret_types = ['dict', 'list']
+    ca.check_mismatch('Return Type', return_type, ret_types)
 
     def get_single(dnm) -> Union[float, Any]:
         # ic(dnm, dnm2csv_path(dnm))
@@ -135,7 +139,8 @@ def dataset_acc(
         acc = acc_row['f1-score']
         assert acc_row.precision == acc_row.recall == acc
         return acc
-    return {d: get_single(d) for d in dataset_names}
+    accs = [get_single(d) for d in dataset_names]
+    return dict(zip(dataset_names, accs)) if return_type == 'dict' else accs
 
 
 if __name__ == '__main__':

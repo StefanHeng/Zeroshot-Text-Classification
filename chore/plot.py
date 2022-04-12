@@ -69,7 +69,7 @@ def plot_class_heatmap(
 if __name__ == '__main__':
     from icecream import ic
 
-    from chore import *
+    from chore.util import *
 
     # dnm = 'slurp'
     # dnm = 'yahoo'
@@ -91,42 +91,38 @@ if __name__ == '__main__':
             'twilight_shifted'
         ]
         for cm in cmaps:
-            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os.path.join(PATH_BASE_CHORE, 'plot'))
+            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os.path.join(get_chore_base(), 'plot'))
 
     # plot_class_heatmap(dnm, save=False, dir_save=os.path.join(path_base, 'plot'))
 
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
         md_nm, strat = prettier_model_name_n_sample_strategy(model_name, strategy)
-        dir_save = os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
+        dir_save = os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in config('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
-    def plot_approaches_performance(
+    def plot_setups_acc(
             setups: List[Tuple[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False
     ):
-        domains = ['in', 'out']
-        assert domain in domains, f'Unexpected domain: expected one of {domains}, got {domain}'
-        train_strats = ['vanilla', 'implicit', 'explicit']
-        assert train_strategy in train_strats, \
-            f'Unexpected train strategy: expected one of {logi(train_strats)}, got {logi(train_strategy)}'
+        ca(domain=domain, training_strategy=train_strategy)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        d_dnms = D_DATASET_NAMES[domain_str]
-        fig, axes = plt.subplots(1, len(d_dnms), figsize=(16, 6))
+        aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
+        fig, axes = plt.subplots(1, len(aspect2dnms), figsize=(16, 6))
         # Ordered, uniq list names, for consistent color code between runs
         models = list(OrderedDict((md, None) for md, strat in setups))
         n_color = len(models)+1
         cs = sns.color_palette(palette='husl', n_colors=n_color)
 
-        for ax, (aspect, dnms) in zip(axes, d_dnms.items()):
+        for ax, (aspect, dnms) in zip(axes, aspect2dnms.items()):
             for md_nm, sample_strat in setups:
                 path = get_dnm2csv_path_fn(
-                    model_name=md_nm, sample_strategy=sample_strat, train_strategy=train_strategy, domain=domain)
+                    model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy, domain=domain)
                 # As percentage
-                scores = [s['f1-score'] * 100 for s in dataset_acc(dataset_names=dnms, dnm2csv_path=path)]
+                scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
                 dnm_ints = list(range(len(dnms)))
                 ls = ':' if sample_strat == 'vect' else '-'
                 i_color = models.index(md_nm)
@@ -137,6 +133,7 @@ if __name__ == '__main__':
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
+        # ic(scores)
         ma, mi = scores.max(), scores.min()
         ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
         for ax, edges_ in zip(axes, edges):
@@ -149,8 +146,8 @@ if __name__ == '__main__':
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
         fig.supxlabel('Dataset')
-        if save:  # TODO: distance between dsets
-            plt.savefig(os.path.join(PATH_BASE_CHORE, 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
+        if save:
+            plt.savefig(os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
         else:
             plt.show()
     # plot_approaches_performance(save=True)
@@ -165,7 +162,7 @@ if __name__ == '__main__':
             ('gpt2-nvidia', 'NA')
         ]
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
-        plot_approaches_performance(setups, domain='in', save=True)
+        plot_setups_acc(setups, domain='in', save=True)
     # plot_in_domain()
 
     def plot_out_of_domain():
@@ -178,7 +175,7 @@ if __name__ == '__main__':
             ('gpt2-nvidia', 'NA'),
         ]
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
-        plot_approaches_performance(setups, domain='out', save=True)
+        plot_setups_acc(setups, domain='out', save=True)
     # plot_out_of_domain()
 
     def plot_in_implicit():
@@ -188,5 +185,6 @@ if __name__ == '__main__':
             ('bi-encoder', 'rand'),
             # ('gpt2-nvidia', 'NA')
         ]
-        plot_approaches_performance(setups, domain='in', train_strategy='implicit', save=True)
+        plot_setups_acc(setups, domain='out', train_strategy='implicit', save=True)
+        # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
     plot_in_implicit()

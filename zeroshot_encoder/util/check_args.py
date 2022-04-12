@@ -45,8 +45,10 @@ class CheckArg:
             self.d_name2func[k](kwargs[k])
 
 
+ca = CheckArg()
+
+
 if __name__ == '__main__':
-    ca = CheckArg()
 
     md_nm, dm, samp_strat, tr_strat = 'bert-nli', 'in', 'rand', 'implicit'
     ca(model_name=md_nm, domain=dm, sampling_strategy=samp_strat, training_strategy=tr_strat)
