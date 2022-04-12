@@ -68,7 +68,21 @@ class ChoreConfig:
                 (('gpt2-nvidia', 'NA', 'vanilla', 'out'), [
                     'gpt2-nvidia', 'NA, vanilla', 'out-of-domain, 2022-04-06_23-43-19'])
             ]),
-
+            'pretty': {
+                'model-name': {
+                    'binary-bert': 'Binary BERT',
+                    'bert-nli': 'BERT-NLI',
+                    'bi-encoder': 'Bi-Encoder',
+                    'dual-bi-encoder': 'Dual Bi-Encoder',
+                    'gpt2-nvidia': 'GPT2-NVIDIA'
+                },
+                'sampling-strategy': dict(
+                    rand='Random Negative Sampling',
+                    vect='Word2Vec Average Extremes',
+                    none='Positive Labels Only',
+                    NA='NA'
+                )
+            }
         }
 
     def __call__(self, key: str):
@@ -92,40 +106,20 @@ def get_dnm2csv_path_fn(
 
 
 def prettier_model_name_n_sample_strategy(
-        model_name: str, sampling_strategy: str, pprint=False
+        model_name: str, sampling_strategy: str, pprint=True, compact=False
 ) -> Union[Tuple[str, str], str]:
-    if not hasattr(prettier_model_name_n_sample_strategy, 'd_pretty'):
-        prettier_model_name_n_sample_strategy.d_pretty = dict(
-            model_name={
-                'binary-bert': 'Binary BERT',
-                'bert-nli': 'BERT-NLI',
-                'bi-encoder': 'Bi-Encoder',
-                'dual-bi-encoder': 'Dual Bi-Encoder',
-                'gpt2-nvidia': 'GPT2-NVIDIA'
-            },
-            sampling_strategy=dict(
-                rand='Random Negative Sampling',
-                vect='Word2Vec Average Extremes',
-                none='Positive Labels Only',
-                NA='NA'
-            )
-        )
     ca(model_name=model_name, sampling_strategy=sampling_strategy)
-    model_name_ = prettier_model_name_n_sample_strategy.d_pretty['model_name'][model_name]
-    sampling_strategy_ = prettier_model_name_n_sample_strategy.d_pretty['sampling_strategy'][sampling_strategy]
+    md_nm, samp_strat = cconfig('pretty.model-name')[model_name], cconfig('pretty.sampling-strategy')[sampling_strategy]
     if pprint:
-        return f'{model_name_} w/ {sampling_strategy_}' if sampling_strategy_ != 'NA' else model_name_
+        return md_nm if samp_strat == 'NA' else (f'{md_nm}\n{samp_strat}' if compact else f'{md_nm} w/ {samp_strat}')
     else:
-        return model_name_, sampling_strategy_
+        return md_nm, samp_strat
 
 
 def dataset_acc(
-        dataset_names: Iterable[str], dnm2csv_path: Callable = None,
+        dataset_names: Union[Iterable[str], str], dnm2csv_path: Callable = None,
         suppress_not_found: Union[bool, Any] = False, return_type: str = 'dict'
-) -> Dict[str, Union[float, Any]]:
-    ret_types = ['dict', 'list']
-    ca.check_mismatch('Return Type', return_type, ret_types)
-
+) -> Union[Dict[str, Union[float, Any]], float]:
     def get_single(dnm) -> Union[float, Any]:
         # ic(dnm, dnm2csv_path(dnm))
         path = dnm2csv_path(dnm)
@@ -139,8 +133,13 @@ def dataset_acc(
         acc = acc_row['f1-score']
         assert acc_row.precision == acc_row.recall == acc
         return acc
-    accs = [get_single(d) for d in dataset_names]
-    return dict(zip(dataset_names, accs)) if return_type == 'dict' else accs
+    if isinstance(dataset_names, str):
+        return get_single(dataset_names)
+    else:
+        ret_types = ['dict', 'list']
+        ca.check_mismatch('Return Type', return_type, ret_types)
+        accs = [get_single(d) for d in dataset_names]
+        return dict(zip(dataset_names, accs)) if return_type == 'dict' else accs
 
 
 if __name__ == '__main__':

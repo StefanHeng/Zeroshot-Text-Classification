@@ -76,7 +76,7 @@ if __name__ == '__main__':
     #             writer.writerow([model_name, strategy] + summaries2table_row(summaries, exp='csv'))
     # # get_csv(domain='out')
 
-    def write_csv(training_strategy: str = 'vanilla'):
+    def write_csv_model_setup_by_dataset(training_strategy: str = 'vanilla'):
         if training_strategy != 'all':
             ca(training_strategy=training_strategy)
         train_setup2csv_path: OrderedDict = cconfig('train-setup2dset-eval-path')
@@ -89,8 +89,6 @@ if __name__ == '__main__':
             ])
         dom2dnms = cconfig('domain2dataset-names-all')  # include deprecated `arxiv`
         dnms_in, dnms_out = dom2dnms['in'], dom2dnms['out']
-        fnm = f'{training_strategy.capitalize()} classification accuracy, {now(for_path=True)}.csv'
-        path_out = os.path.join(get_chore_base(), 'table', fnm)
 
         n_in, n_out = len(dnms_in), len(dnms_out)
         # rows of headers
@@ -122,10 +120,55 @@ if __name__ == '__main__':
             for setup in setups:
                 rows.append(get_row(*setup, training_strategy))
 
-        with open(path_out, 'w') as f:
+        fnm = f'{training_strategy.capitalize()} classification accuracy, {now(for_path=True)}.csv'
+        fnm = os.path.join(get_chore_base(), 'table', fnm)
+        with open(fnm, 'w') as f:
             writer = csv.writer(f)
             for r in rows:
                 writer.writerow(r)
     # write_csv()
     # write_csv(training_strategy='implicit')
-    write_csv(training_strategy='all')
+    # write_csv_model_setup_by_dataset(training_strategy='all')
+
+    def write_csv_model_by_dataset_setup():
+        """
+        On only the Bert models & GPT2, random sampling
+        """
+        train_strategies = ['vanilla', 'implicit']
+        dom2dnms = cconfig('domain2dataset-names-all')  # include deprecated `arxiv`
+        dnms_in, dnms_out = dom2dnms['in'], dom2dnms['out']
+        header_in = sum([[f'in/{dnm}'] * len(train_strategies) for dnm in dnms_in], start=[])
+        header_out = sum([[f'out/{dnm}'] * len(train_strategies) for dnm in dnms_out], start=[])
+        rows: List[List] = [  # header
+            ['domain/dataset name'] + header_in + header_out,
+            ['training strategy\\\nmodel'] + train_strategies * (len(dnms_in) + len(dnms_out))
+        ]
+        setups = [
+            ('binary-bert', 'rand'),
+            ('bert-nli', 'rand'),
+            ('bi-encoder', 'rand'),
+            ('gpt2-nvidia', 'NA'),
+        ]
+        for model_name, samp_strat in setups:
+            col_name = prettier_model_name_n_sample_strategy(model_name, samp_strat, compact=True)
+            row = [col_name]
+            for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
+                for dnm in dnms:
+                    for train_strat in train_strategies:
+                        if model_name == 'gpt2-nvidia' and train_strat == 'implicit':  # no implicit for GPT2
+                            acc = None
+                        else:
+                            dnm2csv_path = get_dnm2csv_path_fn(model_name, samp_strat, train_strat, domain=domain)
+                            acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                            acc = f'{acc * 100:4.1f}' if bool(acc) else None
+                        row.append(acc)
+            rows.append(row)
+
+        fnm = f'Model classification accuracy by dataset & training strategy, {now(for_path=True)}.csv'
+        fnm = os.path.join(get_chore_base(), 'table', fnm)
+        with open(fnm, 'w') as f:
+            writer = csv.writer(f)
+            for r in rows:
+                writer.writerow(r)
+    write_csv_model_by_dataset_setup()
+
