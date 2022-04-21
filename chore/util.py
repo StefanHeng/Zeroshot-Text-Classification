@@ -43,6 +43,8 @@ class ChoreConfig:
                 (('binary-bert', 'rand', 'implicit', 'in'), ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22']),
                 (('binary-bert', 'rand', 'implicit', 'out'), [
                     'binary-bert', 'rand, implicit', 'out-of-domain, 04.11.22']),
+                (('binary-bert', 'rand', 'implicit-text-aspect', 'in'), [
+                    'binary-bert', 'rand, implicit-text-aspect', 'in-domain, 04.21.22']),
                 (('binary-bert', 'vect', 'vanilla', 'in'), ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22']),
 
                 (('bert-nli', 'rand', 'vanilla', 'in'), ['bert-nli', 'rand, vanilla', 'in-domain, 03.24.22']),

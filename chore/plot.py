@@ -105,22 +105,24 @@ if __name__ == '__main__':
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
     def plot_setups_acc(
-            setups: List[Tuple[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False
+            setups: List[Dict[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False
     ):
-        ca(domain=domain, training_strategy=train_strategy)
+        ca(domain=domain)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
         fig, axes = plt.subplots(1, len(aspect2dnms), figsize=(16, 6))
-        # Ordered, uniq list names, for consistent color code between runs
-        models = list(OrderedDict((md, None) for md, strat in setups))
-        n_color = len(models)+1
-        cs = sns.color_palette(palette='husl', n_colors=n_color)
+        # color-code by model name
+        models = list(OrderedDict((d['model_name'], None) for d in setups))
+        cs = sns.color_palette(palette='husl', n_colors=len(models))
 
         for ax, (aspect, dnms) in zip(axes, aspect2dnms.items()):
-            for md_nm, sample_strat in setups:
+            for s in setups:
+                md_nm, sample_strat = s['model_name'], s['sampling_strategy']
+                train_strat = s.get('training_strategy', train_strategy)
+                ca(model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy)
                 path = get_dnm2csv_path_fn(
-                    model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy, domain=domain)
+                    model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strat, domain=domain)
                 # As percentage
                 scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
                 dnm_ints = list(range(len(dnms)))
@@ -141,7 +143,7 @@ if __name__ == '__main__':
             ma_, mi_ = float(edges_.max()), float(edges_.min())
             assert ma_.is_integer() and mi_.is_integer()
             ax.set_xlim([mi_-0.25, ma_+0.25])
-        title = f'{train_strategy.capitalize()} Training Clasisifcation Accuracy - {domain_str} evaluation'
+        title = f'Training Clasisifcation Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
@@ -187,4 +189,15 @@ if __name__ == '__main__':
         ]
         plot_setups_acc(setups, domain='out', train_strategy='implicit', save=True)
         # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
-    plot_in_implicit()
+    # plot_in_implicit()
+
+    def plot_berts_implicit():
+        setups = [
+            ('binary-bert', 'rand', 'vanilla'),
+            ('binary-bert', 'rand', 'implicit'),
+            ('binary-bert', 'rand', 'implicit-text-aspect'),
+            # ('binary-bert', 'implicit-text-sep'),
+        ]
+        setups = [dict(zip(['model', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
+        plot_setups_acc(setups, domain='in', save=False)
+    plot_berts_implicit()
