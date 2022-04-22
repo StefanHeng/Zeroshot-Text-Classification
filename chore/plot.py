@@ -97,7 +97,7 @@ if __name__ == '__main__':
 
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
-        md_nm, strat = prettier_model_name_n_sample_strategy(model_name, strategy)
+        md_nm, strat = prettier_setup(model_name, strategy)
         dir_save = os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in config('UTCD.datasets'):
@@ -105,7 +105,9 @@ if __name__ == '__main__':
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
     def plot_setups_acc(
-            setups: List[Dict[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False
+            setups: List[Dict[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False,
+            color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
+            title: str = None,
     ):
         ca(domain=domain)
 
@@ -113,8 +115,10 @@ if __name__ == '__main__':
         aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
         fig, axes = plt.subplots(1, len(aspect2dnms), figsize=(16, 6))
         # color-code by model name
-        models = list(OrderedDict((d['model_name'], None) for d in setups))
-        cs = sns.color_palette(palette='husl', n_colors=len(models))
+        color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
+        cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
+        if isinstance(pretty_keys, str):
+            pretty_keys = (pretty_keys,)
 
         for ax, (aspect, dnms) in zip(axes, aspect2dnms.items()):
             for s in setups:
@@ -127,8 +131,9 @@ if __name__ == '__main__':
                 scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
                 dnm_ints = list(range(len(dnms)))
                 ls = ':' if sample_strat == 'vect' else '-'
-                i_color = models.index(md_nm)
-                label = prettier_model_name_n_sample_strategy(md_nm, sample_strat, pprint=True)
+                i_color = color_opns.index(s[color_code_by])
+                d_pretty = {k: s[k] for k in pretty_keys}
+                label = prettier_setup(md_nm, **d_pretty, pprint=True)
                 ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
             dnm_ints = list(range(len(dnms)))
             ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
@@ -136,14 +141,16 @@ if __name__ == '__main__':
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
         # ic(scores)
-        ma, mi = scores.max(), scores.min()
+        ma, mi = np.max(scores), np.min(scores)
         ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
         for ax, edges_ in zip(axes, edges):
             ax.set_ylim([mi, ma])
-            ma_, mi_ = float(edges_.max()), float(edges_.min())
+            ma_, mi_ = float(np.max(edges_)), float(np.min(edges_))
             assert ma_.is_integer() and mi_.is_integer()
             ax.set_xlim([mi_-0.25, ma_+0.25])
-        title = f'Training Clasisifcation Accuracy - {domain_str} evaluation'
+        for ax in axes[1:]:
+            ax.set_yticklabels([])
+        title = title or f'Training Clasisifcation Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
         fig.supylabel('Classification Accuracy (%)')
@@ -163,6 +170,7 @@ if __name__ == '__main__':
             # ('dual-bi-encoder', 'none'),
             ('gpt2-nvidia', 'NA')
         ]
+        setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         # plot_approaches_performance(setups_in, in_domain=True, save=False)
         plot_setups_acc(setups, domain='in', save=True)
     # plot_in_domain()
@@ -176,6 +184,7 @@ if __name__ == '__main__':
             # ('dual-bi-encoder', 'none'),
             ('gpt2-nvidia', 'NA'),
         ]
+        setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_setups_acc(setups, domain='out', save=True)
     # plot_out_of_domain()
@@ -187,17 +196,25 @@ if __name__ == '__main__':
             ('bi-encoder', 'rand'),
             # ('gpt2-nvidia', 'NA')
         ]
+        setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         plot_setups_acc(setups, domain='out', train_strategy='implicit', save=True)
         # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
     # plot_in_implicit()
 
-    def plot_berts_implicit():
+    def plot_berts_implicit(domain: str = 'in'):
         setups = [
             ('binary-bert', 'rand', 'vanilla'),
             ('binary-bert', 'rand', 'implicit'),
-            ('binary-bert', 'rand', 'implicit-text-aspect'),
-            # ('binary-bert', 'implicit-text-sep'),
+            ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
+            ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
         ]
-        setups = [dict(zip(['model', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
-        plot_setups_acc(setups, domain='in', save=False)
-    plot_berts_implicit()
+        setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
+
+        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+        title = f'Training Clasisifcation Accuracy - {domain_str} evaluation with Random Sapling'
+        plot_setups_acc(
+            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            title=title
+        )
+    plot_berts_implicit(domain='in')
+    # plot_berts_implicit(domain='out')

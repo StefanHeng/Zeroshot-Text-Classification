@@ -150,7 +150,7 @@ if __name__ == '__main__':
             ('gpt2-nvidia', 'NA'),
         ]
         for model_name, samp_strat in setups:
-            col_name = prettier_model_name_n_sample_strategy(model_name, samp_strat, compact=True)
+            col_name = prettier_setup(model_name, samp_strat, compact=True)
             row = [col_name]
             for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
                 for dnm in dnms:

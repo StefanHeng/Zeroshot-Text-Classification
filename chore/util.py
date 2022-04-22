@@ -43,8 +43,14 @@ class ChoreConfig:
                 (('binary-bert', 'rand', 'implicit', 'in'), ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22']),
                 (('binary-bert', 'rand', 'implicit', 'out'), [
                     'binary-bert', 'rand, implicit', 'out-of-domain, 04.11.22']),
-                (('binary-bert', 'rand', 'implicit-text-aspect', 'in'), [
+                (('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in'), [
                     'binary-bert', 'rand, implicit-text-aspect', 'in-domain, 04.21.22']),
+                (('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out'), [
+                    'binary-bert', 'rand, implicit-text-aspect', 'out-of-domain, 04.21.22']),
+                (('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in'), [
+                    'binary-bert', 'rand, implicit-text-sep', 'in-domain, 04.21.22']),
+                (('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out'), [
+                    'binary-bert', 'rand, implicit-text-sep', 'out-of-domain, 04.21.22']),
                 (('binary-bert', 'vect', 'vanilla', 'in'), ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22']),
 
                 (('bert-nli', 'rand', 'vanilla', 'in'), ['bert-nli', 'rand, vanilla', 'in-domain, 03.24.22']),
@@ -83,7 +89,13 @@ class ChoreConfig:
                     vect='Word2Vec Average Extremes',
                     none='Positive Labels Only',
                     NA='NA'
-                )
+                ),
+                'training-strategy': {
+                    'vanilla': 'Vanilla',
+                    'implicit': 'Implicit Labels',
+                    'implicit-on-text-encode-aspect': 'Implicit Text with Aspect token',
+                    'implicit-on-text-encode-sep': 'Implicit Text with Sep token',
+                }
             }
         }
 
@@ -107,15 +119,35 @@ def get_dnm2csv_path_fn(
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 
-def prettier_model_name_n_sample_strategy(
-        model_name: str, sampling_strategy: str, pprint=True, compact=False
+def prettier_setup(
+        model_name: str, sampling_strategy: str = None, training_strategy: str = None, pprint=True
 ) -> Union[Tuple[str, str], str]:
-    ca(model_name=model_name, sampling_strategy=sampling_strategy)
-    md_nm, samp_strat = cconfig('pretty.model-name')[model_name], cconfig('pretty.sampling-strategy')[sampling_strategy]
+    ca(model_name=model_name)
+    if sampling_strategy:
+        ca(sampling_strategy=sampling_strategy)
+    if training_strategy:
+        ca(training_strategy=training_strategy)
+    md_nm = cconfig('pretty.model-name')[model_name]
+    samp_strat = cconfig('pretty.sampling-strategy')[sampling_strategy] if sampling_strategy else None
+    train_strat = cconfig('pretty.training-strategy')[training_strategy] if training_strategy else None
     if pprint:
-        return md_nm if samp_strat == 'NA' else (f'{md_nm}\n{samp_strat}' if compact else f'{md_nm} w/ {samp_strat}')
+        ret = md_nm
+        pref_1st, pref_later = '\n  w/ ', '\n  & '
+        gone_1st = False
+        if samp_strat and samp_strat != 'NA':
+            pref = pref_later if gone_1st else pref_1st
+            ret = f'{ret}{pref}{samp_strat}'
+            gone_1st = True
+        if train_strat:
+            pref = pref_later if gone_1st else pref_1st
+            ret = f'{ret}{pref}{train_strat} training'
+            gone_1st = True
+        return ret
     else:
-        return md_nm, samp_strat
+        ret = md_nm, samp_strat
+        if training_strategy:
+            ret = ret + (training_strategy,)
+        return ret
 
 
 def dataset_acc(
