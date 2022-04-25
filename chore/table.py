@@ -130,13 +130,13 @@ if __name__ == '__main__':
     # write_csv(training_strategy='implicit')
     # write_csv_model_setup_by_dataset(training_strategy='all')
 
-    def write_csv_model_by_dataset_setup():
+    def write_csv_model_by_dataset_setup(train_strategies: Tuple[str, ...] = ('vanilla', 'implicit')):
         """
         On only the Bert models & GPT2, random sampling
         """
-        train_strategies = ['vanilla', 'implicit']
         dom2dnms = cconfig('domain2dataset-names-all')  # include deprecated `arxiv`
         dnms_in, dnms_out = dom2dnms['in'], dom2dnms['out']
+        train_strategies = list(train_strategies)
         header_in = sum([[f'in/{dnm}'] * len(train_strategies) for dnm in dnms_in], start=[])
         header_out = sum([[f'out/{dnm}'] * len(train_strategies) for dnm in dnms_out], start=[])
         rows: List[List] = [  # header
@@ -150,12 +150,14 @@ if __name__ == '__main__':
             ('gpt2-nvidia', 'NA'),
         ]
         for model_name, samp_strat in setups:
-            col_name = prettier_setup(model_name, samp_strat, compact=True)
+            col_name = prettier_setup(model_name, samp_strat)
             row = [col_name]
             for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
                 for dnm in dnms:
                     for train_strat in train_strategies:
                         if model_name == 'gpt2-nvidia' and train_strat == 'implicit':  # no implicit for GPT2
+                            acc = None
+                        elif 'on-text' in train_strat and model_name != 'binary-bert':  # other models not trained yet
                             acc = None
                         else:
                             dnm2csv_path = get_dnm2csv_path_fn(model_name, samp_strat, train_strat, domain=domain)
@@ -170,5 +172,9 @@ if __name__ == '__main__':
             writer = csv.writer(f)
             for r in rows:
                 writer.writerow(r)
-    write_csv_model_by_dataset_setup()
-
+    tr_starts = (
+        'vanilla', 'implicit',
+        'implicit-on-text-encode-aspect',
+        'implicit-on-text-encode-sep',
+    )
+    write_csv_model_by_dataset_setup(train_strategies=tr_starts)

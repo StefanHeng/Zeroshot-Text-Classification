@@ -187,14 +187,14 @@ if __name__ == '__main__':
         setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_setups_acc(setups, domain='out', save=True)
-    # plot_out_of_domain()
+    plot_out_of_domain()
 
     def plot_in_implicit():
         setups = [
             ('binary-bert', 'rand'),
             ('bert-nli', 'rand'),
             ('bi-encoder', 'rand'),
-            # ('gpt2-nvidia', 'NA')
+            ('gpt2-nvidia', 'NA')
         ]
         setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         plot_setups_acc(setups, domain='out', train_strategy='implicit', save=True)
@@ -216,5 +216,5 @@ if __name__ == '__main__':
             setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
             title=title
         )
-    plot_berts_implicit(domain='in')
+    # plot_berts_implicit(domain='in')
     # plot_berts_implicit(domain='out')

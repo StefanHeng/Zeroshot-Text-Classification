@@ -5,7 +5,7 @@
 
 
 
-## To Use 
+## Usage
 Python version `3.9.7`.
 
 ```bash

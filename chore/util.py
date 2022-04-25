@@ -5,7 +5,7 @@ from zeroshot_encoder.util import *
 
 
 def get_chore_base() -> str:
-    return os.path.join(PATH_BASE, DIR_PROJ, 'chore')
+    return os.path.join(BASE_PATH, PROJ_DIR, 'chore')
 
 
 class ChoreConfig:
@@ -114,7 +114,7 @@ def get_dnm2csv_path_fn(
         domain: str = 'in'
 ) -> Callable:
     ca(model_name=model_name, domain=domain, sampling_strategy=sampling_strategy, training_strategy=training_strategy)
-    paths = [PATH_BASE, DIR_PROJ, 'evaluations']
+    paths = [BASE_PATH, PROJ_DIR, 'evaluations']
     paths += cconfig('train-setup2dset-eval-path')[(model_name, sampling_strategy, training_strategy, domain)]
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
