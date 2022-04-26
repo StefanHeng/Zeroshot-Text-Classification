@@ -1,4 +1,11 @@
-from zeroshot_encoder.util import *
+from typing import List, Callable
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# from stefutil import *
+# from zeroshot_encoder.util import *
 
 
 def plot_class_heatmap(
@@ -100,20 +107,24 @@ if __name__ == '__main__':
         md_nm, strat = prettier_setup(model_name, strategy)
         dir_save = os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
-        for dnm_ in config('UTCD.datasets'):
+        for dnm_ in sconfig('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
     def plot_setups_acc(
-            setups: List[Dict[str, str]], domain: str = 'in', train_strategy: str = 'vanilla', save=False,
+            setups: List[Dict[str, str]], domain: str = 'in',
+            train_strategy: str = 'vanilla', train_description: str = '3ep',
+            save=False,
             color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
             title: str = None,
     ):
-        ca(domain=domain)
+        ca(dataset_domain=domain)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
-        fig, axes = plt.subplots(1, len(aspect2dnms), figsize=(16, 6))
+        fig, axes = plt.subplots(1, len(aspect2dnms),
+                                 # figsize=(16, 6),
+                                 constrained_layout=False)
         # color-code by model name
         color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
         cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
@@ -124,23 +135,27 @@ if __name__ == '__main__':
             for s in setups:
                 md_nm, sample_strat = s['model_name'], s['sampling_strategy']
                 train_strat = s.get('training_strategy', train_strategy)
+                train_desc = s.get('train_description', train_description)
                 ca(model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy)
                 path = get_dnm2csv_path_fn(
-                    model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strat, domain=domain)
+                    model_name=md_nm, sampling_strategy=sample_strat, domain=domain,
+                    training_strategy=train_strat, train_description=train_desc
+                )
                 # As percentage
                 scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
                 dnm_ints = list(range(len(dnms)))
-                ls = ':' if sample_strat == 'vect' else '-'
+                ls = s.get('line_style', ':' if sample_strat == 'vect' else '-')
                 i_color = color_opns.index(s[color_code_by])
                 d_pretty = {k: s[k] for k in pretty_keys}
                 label = prettier_setup(md_nm, **d_pretty, pprint=True)
+                post = s.get('label_postfix', '')
+                label = f'{label}{post}'
                 ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
             dnm_ints = list(range(len(dnms)))
             ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
             ax.set_title(f'{aspect} split')
         scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
         edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
-        # ic(scores)
         ma, mi = np.max(scores), np.min(scores)
         ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
         for ax, edges_ in zip(axes, edges):
@@ -150,11 +165,30 @@ if __name__ == '__main__':
             ax.set_xlim([mi_-0.25, ma_+0.25])
         for ax in axes[1:]:
             ax.set_yticklabels([])
-        title = title or f'Training Clasisifcation Accuracy - {domain_str} evaluation'
+        title = title or f'Training Classification Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
-        plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+        # plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+        # plt.legend(loc='lower center', bbox_transform=fig.transFigure)
+        # fig.legend(
+        #     # bbox_to_anchor=(1, 0),
+        #            loc="lower center",
+        #            bbox_transform=fig.transFigure,
+        #     # ncol=3
+        # )
+        handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
+        label2handle = dict(zip(labels, handles))
+        label_n_handle = OrderedDict(sorted(label2handle.items(), key=lambda t: t[0]))
+        fig.legend(label_n_handle.values(), label_n_handle.keys(), loc='lower center', bbox_transform=fig.transFigure)
+        # ic(handles, labels, label2handle)
+        # fig.legend(by_label.values(), by_label.keys(),
+        #            loc="lower center",
+        #            bbox_transform=fig.transFigure)
+        # fig.legend(loc="lower center", bbox_transform=fig.transFigure)
+        legend_v_ratio = 0.15
+        plt.subplots_adjust(bottom=legend_v_ratio)
         fig.supylabel('Classification Accuracy (%)')
         fig.supxlabel('Dataset')
+        plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
         if save:
             plt.savefig(os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
         else:
@@ -187,7 +221,7 @@ if __name__ == '__main__':
         setups = [dict(zip(['model_name', 'sampling_strategy'], s)) for s in setups]
         # plot_approaches_performance(setups_out, in_domain=False, save=False)
         plot_setups_acc(setups, domain='out', save=True)
-    plot_out_of_domain()
+    # plot_out_of_domain()
 
     def plot_in_implicit():
         setups = [
@@ -201,20 +235,42 @@ if __name__ == '__main__':
         # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
     # plot_in_implicit()
 
-    def plot_berts_implicit(domain: str = 'in'):
-        setups = [
-            ('binary-bert', 'rand', 'vanilla'),
-            ('binary-bert', 'rand', 'implicit'),
-            ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
-            ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
-        ]
-        setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
+    def plot_berts_implicit(domain: str = 'in', with_5ep=False):
+        if with_5ep:
+            # setups = []
+            # for n_ep in '3ep', '5ep':
+            #     keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
+            #     setups += [dict(zip(keys, s + (n_ep,))) for s in _setups]
+            _setups = [
+                ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
+                ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '3ep', ':', ' for 3 epochs'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '3ep', ':', ' for 3 epochs'),
+                # Vanilla to 5 ep not trained
+                ('binary-bert', 'rand', 'implicit', '5ep', '-', ' for 5 epochs'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '5ep', '-', ' for 5 epochs'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '5ep', '-', ' for 5 epochs')
+            ]
+            keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
+            keys += ['line_style', 'label_postfix']
+            setups = [dict(zip(keys, s)) for s in _setups]
+        else:
+            _setups = [
+                ('binary-bert', 'rand', 'vanilla'),
+                ('binary-bert', 'rand', 'implicit'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
+            ]
+            setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
+        # ic(setups)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        title = f'Training Clasisifcation Accuracy - {domain_str} evaluation with Random Sapling'
+        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
         plot_setups_acc(
             setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
             title=title
         )
     # plot_berts_implicit(domain='in')
     # plot_berts_implicit(domain='out')
+    # plot_berts_implicit(domain='in', with_5ep=True)
+    plot_berts_implicit(domain='out', with_5ep=True)

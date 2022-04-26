@@ -8,6 +8,8 @@ models/
 test_lang*
 examples/
 chore/*/
+eval/
+evaluation/
 evaluations/
 pretrained-models/
 trained-models/

@@ -1,6 +1,11 @@
+import os
 from copy import deepcopy
-from typing import Any
+from typing import Tuple, Dict, Iterable, Callable, Any, Union
+from collections import OrderedDict
 
+import pandas as pd
+
+from stefutil import *
 from zeroshot_encoder.util import *
 
 
@@ -36,46 +41,65 @@ class ChoreConfig:
                 'in': sum(d_dset_names_all['in'].values(), start=[]),
                 'out': sum(d_dset_names_all['out'].values(), start=[])
             },
-            'train-setup2dset-eval-path': OrderedDict([
-                (('binary-bert', 'rand', 'vanilla', 'in'), ['binary-bert', 'rand, vanilla', 'in-domain, 03.24.22']),
-                (('binary-bert', 'rand', 'vanilla', 'out'), [
-                    'binary-bert', 'rand, vanilla', 'out-of-domain, 04.06.22']),
-                (('binary-bert', 'rand', 'implicit', 'in'), ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22']),
-                (('binary-bert', 'rand', 'implicit', 'out'), [
-                    'binary-bert', 'rand, implicit', 'out-of-domain, 04.11.22']),
-                (('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in'), [
-                    'binary-bert', 'rand, implicit-text-aspect', 'in-domain, 04.21.22']),
-                (('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out'), [
-                    'binary-bert', 'rand, implicit-text-aspect', 'out-of-domain, 04.21.22']),
-                (('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in'), [
-                    'binary-bert', 'rand, implicit-text-sep', 'in-domain, 04.21.22']),
-                (('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out'), [
-                    'binary-bert', 'rand, implicit-text-sep', 'out-of-domain, 04.21.22']),
-                (('binary-bert', 'vect', 'vanilla', 'in'), ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22']),
+            'train-setup2dset-eval-path': OrderedDict({
+                ('binary-bert', 'rand', 'vanilla', 'in', '3ep'):
+                    ['binary-bert', 'rand, vanilla', 'in-domain, 03.24.22'],
+                ('binary-bert', 'rand', 'vanilla', 'out', '3ep'):
+                    ['binary-bert', 'rand, vanilla', 'out-of-domain, 04.06.22'],
+                ('binary-bert', 'rand', 'implicit', 'in', '3ep'):
+                    ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22'],
+                ('binary-bert', 'rand', 'implicit', 'in', '5ep'):
+                    ['binary-bert', 'rand, implicit, 5ep', 'in-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'implicit', 'out', '3ep'):
+                    ['binary-bert', 'rand, implicit', 'out-of-domain, 04.11.22'],
+                ('binary-bert', 'rand', 'implicit', 'out', '5ep'):
+                    ['binary-bert', 'rand, implicit, 5ep', 'out-of-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in', '3ep'):
+                    ['binary-bert', 'rand, implicit-text', 'in-domain, 04.21.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in', '5ep'):
+                    ['binary-bert', 'rand, implicit-text, 5ep', 'in-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '3ep'):
+                    ['binary-bert', 'rand, implicit-text', 'out-of-domain, 04.21.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '5ep'):
+                    ['binary-bert', 'rand, implicit-text, 5ep', 'out-of-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '3ep'):
+                    ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '5ep'):
+                    ['binary-bert', 'rand, implicit-sep, 5ep', 'in-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '3ep'):
+                    ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22'],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '5ep'):
+                    ['binary-bert', 'rand, implicit-sep, 5ep', 'out-of-domain, 04.25.22'],
+                ('binary-bert', 'vect', 'vanilla', 'in', '3ep'):
+                    ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22'],
 
-                (('bert-nli', 'rand', 'vanilla', 'in'), ['bert-nli', 'rand, vanilla', 'in-domain, 03.24.22']),
-                (('bert-nli', 'rand', 'vanilla', 'out'), ['bert-nli', 'rand, vanilla', 'out-of-domain, 04.06.22']),
-                (('bert-nli', 'rand', 'implicit', 'in'), ['bert-nli', 'rand, implicit', 'in-domain, 04.09.22']),
-                (('bert-nli', 'rand', 'implicit', 'out'), ['bert-nli', 'rand, implicit', 'out-of-domain, 04.11.22']),
-                (('bert-nli', 'vect', 'vanilla', 'in'), ['bert-nli', 'vect, vanilla', 'in-domain, 03.05.22']),
-                (('bert-nli', 'vect', 'vanilla', 'out'), ['bert-nli', 'vect, vanilla', 'out-of-domain, 03.09.22']),
+                ('bert-nli', 'rand', 'vanilla', 'in', '3ep'): ['bert-nli', 'rand, vanilla', 'in-domain, 03.24.22'],
+                ('bert-nli', 'rand', 'vanilla', 'out', '3ep'): ['bert-nli', 'rand, vanilla', 'out-of-domain, 04.06.22'],
+                ('bert-nli', 'rand', 'implicit', 'in', '3ep'): ['bert-nli', 'rand, implicit', 'in-domain, 04.09.22'],
+                ('bert-nli', 'rand', 'implicit', 'out', '3ep'):
+                    ['bert-nli', 'rand, implicit', 'out-of-domain, 04.11.22'],
+                ('bert-nli', 'vect', 'vanilla', 'in', '3ep'): ['bert-nli', 'vect, vanilla', 'in-domain, 03.05.22'],
+                ('bert-nli', 'vect', 'vanilla', 'out', '3ep'): ['bert-nli', 'vect, vanilla', 'out-of-domain, 03.09.22'],
 
-                (('bi-encoder', 'rand', 'vanilla', 'in'), ['bi-encoder', 'rand, vanilla', 'in-domain, 03.26.22']),
-                (('bi-encoder', 'rand', 'vanilla', 'out'), ['bi-encoder', 'rand, vanilla', 'out-of-domain, 04.06.22']),
-                (('bi-encoder', 'rand', 'implicit', 'in'), ['bi-encoder', 'rand, implicit', 'in-domain, 04.09.22']),
-                (('bi-encoder', 'rand', 'implicit', 'out'), ['bi-encoder', 'rand, implicit', 'out-of-domain, 04.11.22']),
-                (('bi-encoder', 'vect', 'vanilla', 'in'), ['bi-encoder', 'vect, vanilla', 'in-domain, 03.07.22']),
+                ('bi-encoder', 'rand', 'vanilla', 'in', '3ep'): ['bi-encoder', 'rand, vanilla', 'in-domain, 03.26.22'],
+                ('bi-encoder', 'rand', 'vanilla', 'out', '3ep'):
+                    ['bi-encoder', 'rand, vanilla', 'out-of-domain, 04.06.22'],
+                ('bi-encoder', 'rand', 'implicit', 'in', '3ep'):
+                    ['bi-encoder', 'rand, implicit', 'in-domain, 04.09.22'],
+                ('bi-encoder', 'rand', 'implicit', 'out', '3ep'): [
+                    'bi-encoder', 'rand, implicit', 'out-of-domain, 04.11.22'],
+                ('bi-encoder', 'vect', 'vanilla', 'in', '3ep'): ['bi-encoder', 'vect, vanilla', 'in-domain, 03.07.22'],
 
-                (('dual-bi-encoder', 'none', 'vanilla', 'in'), [
-                    'dual-bi-encoder', 'none, vanilla', 'in-domain, 03.23.22']),
-                (('dual-bi-encoder', 'none', 'vanilla', 'out'), [
-                    'dual-bi-encoder', 'none, vanilla', 'out-of-domain, 03.23.22']),
+                ('dual-bi-encoder', 'none', 'vanilla', 'in', '3ep'): [
+                    'dual-bi-encoder', 'none, vanilla', 'in-domain, 03.23.22'],
+                ('dual-bi-encoder', 'none', 'vanilla', 'out', '3ep'): [
+                    'dual-bi-encoder', 'none, vanilla', 'out-of-domain, 03.23.22'],
 
-                (('gpt2-nvidia', 'NA', 'vanilla', 'in'), [
-                    'gpt2-nvidia', 'NA, vanilla', 'in-domain, 2022-04-06_23-13-55']),
-                (('gpt2-nvidia', 'NA', 'vanilla', 'out'), [
-                    'gpt2-nvidia', 'NA, vanilla', 'out-of-domain, 2022-04-06_23-43-19'])
-            ]),
+                ('gpt2-nvidia', 'NA', 'vanilla', 'in', '3ep'): [
+                    'gpt2-nvidia', 'NA, vanilla', 'in-domain, 2022-04-06_23-13-55'],
+                ('gpt2-nvidia', 'NA', 'vanilla', 'out', '3ep'): [
+                    'gpt2-nvidia', 'NA, vanilla', 'out-of-domain, 2022-04-06_23-43-19']
+            }),
             'pretty': {
                 'model-name': {
                     'binary-bert': 'Binary BERT',
@@ -111,16 +135,21 @@ cconfig = ChoreConfig()
 
 def get_dnm2csv_path_fn(
         model_name: str, sampling_strategy: str = 'rand', training_strategy: str = 'vanilla',
-        domain: str = 'in'
+        domain: str = 'in', train_description: str = '3ep'
 ) -> Callable:
-    ca(model_name=model_name, domain=domain, sampling_strategy=sampling_strategy, training_strategy=training_strategy)
-    paths = [BASE_PATH, PROJ_DIR, 'evaluations']
-    paths += cconfig('train-setup2dset-eval-path')[(model_name, sampling_strategy, training_strategy, domain)]
+    ca(
+        model_name=model_name, dataset_domain=domain,
+        sampling_strategy=sampling_strategy, training_strategy=training_strategy
+    )
+    paths = [BASE_PATH, PROJ_DIR, 'eval']
+    key = model_name, sampling_strategy, training_strategy, domain, train_description
+    paths += cconfig('train-setup2dset-eval-path')[key]
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 
 def prettier_setup(
-        model_name: str, sampling_strategy: str = None, training_strategy: str = None, pprint=True
+        model_name: str, sampling_strategy: str = None, training_strategy: str = None, pprint=True,
+        newline: bool = False
 ) -> Union[Tuple[str, str], str]:
     ca(model_name=model_name)
     if sampling_strategy:
@@ -132,7 +161,10 @@ def prettier_setup(
     train_strat = cconfig('pretty.training-strategy')[training_strategy] if training_strategy else None
     if pprint:
         ret = md_nm
-        pref_1st, pref_later = '\n  w/ ', '\n  & '
+        if newline:
+            pref_1st, pref_later = '\n  w/ ', '\n  & '
+        else:
+            pref_1st, pref_later = ' w/ ', ' & '
         gone_1st = False
         if samp_strat and samp_strat != 'NA':
             pref = pref_later if gone_1st else pref_1st
@@ -141,7 +173,7 @@ def prettier_setup(
         if train_strat:
             pref = pref_later if gone_1st else pref_1st
             ret = f'{ret}{pref}{train_strat} training'
-            gone_1st = True
+            # gone_1st = True
         return ret
     else:
         ret = md_nm, samp_strat
