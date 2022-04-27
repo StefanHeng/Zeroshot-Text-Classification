@@ -4,9 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# from stefutil import *
-# from zeroshot_encoder.util import *
-
 
 def plot_class_heatmap(
         dataset_name: str, save=False, dir_save: str = '', dnm2csv_path: Callable = None,
@@ -122,9 +119,7 @@ if __name__ == '__main__':
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
-        fig, axes = plt.subplots(1, len(aspect2dnms),
-                                 # figsize=(16, 6),
-                                 constrained_layout=False)
+        fig, axes = plt.subplots(1, len(aspect2dnms), constrained_layout=False)
         # color-code by model name
         color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
         cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
@@ -167,27 +162,15 @@ if __name__ == '__main__':
             ax.set_yticklabels([])
         title = title or f'Training Classification Accuracy - {domain_str} evaluation'
         plt.suptitle(title)
-        # plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
-        # plt.legend(loc='lower center', bbox_transform=fig.transFigure)
-        # fig.legend(
-        #     # bbox_to_anchor=(1, 0),
-        #            loc="lower center",
-        #            bbox_transform=fig.transFigure,
-        #     # ncol=3
-        # )
+        fig.supylabel('Classification Accuracy (%)')
+        fig.supxlabel('Dataset')
+
+        legend_v_ratio = 0.15
         handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
         label2handle = dict(zip(labels, handles))
         label_n_handle = OrderedDict(sorted(label2handle.items(), key=lambda t: t[0]))
         fig.legend(label_n_handle.values(), label_n_handle.keys(), loc='lower center', bbox_transform=fig.transFigure)
-        # ic(handles, labels, label2handle)
-        # fig.legend(by_label.values(), by_label.keys(),
-        #            loc="lower center",
-        #            bbox_transform=fig.transFigure)
-        # fig.legend(loc="lower center", bbox_transform=fig.transFigure)
-        legend_v_ratio = 0.15
         plt.subplots_adjust(bottom=legend_v_ratio)
-        fig.supylabel('Classification Accuracy (%)')
-        fig.supxlabel('Dataset')
         plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
         if save:
             plt.savefig(os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
@@ -237,10 +220,6 @@ if __name__ == '__main__':
 
     def plot_berts_implicit(domain: str = 'in', with_5ep=False):
         if with_5ep:
-            # setups = []
-            # for n_ep in '3ep', '5ep':
-            #     keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
-            #     setups += [dict(zip(keys, s + (n_ep,))) for s in _setups]
             _setups = [
                 ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
                 ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
@@ -272,5 +251,5 @@ if __name__ == '__main__':
         )
     # plot_berts_implicit(domain='in')
     # plot_berts_implicit(domain='out')
-    # plot_berts_implicit(domain='in', with_5ep=True)
-    plot_berts_implicit(domain='out', with_5ep=True)
+    plot_berts_implicit(domain='in', with_5ep=True)
+    # plot_berts_implicit(domain='out', with_5ep=True)
