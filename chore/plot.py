@@ -1,8 +1,15 @@
-from typing import List, Callable
+from os.path import join as os_join
+from typing import List, Tuple, Dict, Callable, Union
+from collections import OrderedDict
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+from stefutil import *
+from zeroshot_encoder.util import *
+from chore.util import *
 
 
 def plot_class_heatmap(
@@ -65,18 +72,85 @@ def plot_class_heatmap(
     plt.suptitle(title)
     if save:
         title = title.replace('\n', '')
-        plt.savefig(os.path.join(dir_save, f'{title}.png'), dpi=300)
+        plt.savefig(os_join(dir_save, f'{title}.png'), dpi=300)
+    else:
+        plt.show()
+
+
+def plot_setups_acc(
+        setups: List[Dict[str, str]], domain: str = 'in',
+        train_strategy: str = 'vanilla', train_description: str = '3ep',
+        save=False,
+        color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
+        title: str = None,
+):
+    ca(dataset_domain=domain)
+
+    domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+    aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
+    fig, axes = plt.subplots(1, len(aspect2dnms), constrained_layout=False)
+    # color-code by model name
+    color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
+    cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
+    if isinstance(pretty_keys, str):
+        pretty_keys = (pretty_keys,)
+
+    for ax, (aspect, dnms) in zip(axes, aspect2dnms.items()):
+        for s in setups:
+            md_nm, sample_strat = s['model_name'], s['sampling_strategy']
+            train_strat = s.get('training_strategy', train_strategy)
+            train_desc = s.get('train_description', train_description)
+            ca(model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy)
+            path = get_dnm2csv_path_fn(
+                model_name=md_nm, sampling_strategy=sample_strat, domain=domain,
+                training_strategy=train_strat, train_description=train_desc
+            )
+            # As percentage
+            scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
+            dnm_ints = list(range(len(dnms)))
+            ls = s.get('line_style', ':' if sample_strat == 'vect' else '-')
+            i_color = color_opns.index(s[color_code_by])
+            d_pretty = {k: s[k] for k in pretty_keys}
+            label = prettier_setup(md_nm, **d_pretty, pprint=True)
+            post = s.get('label_postfix', '')
+            label = f'{label}{post}'
+            ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
+        dnm_ints = list(range(len(dnms)))
+        ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
+        ax.set_title(f'{aspect} split')
+    scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
+    edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
+    ma, mi = np.max(scores), np.min(scores)
+    ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
+    for ax, edges_ in zip(axes, edges):
+        ax.set_ylim([mi, ma])
+        ma_, mi_ = float(np.max(edges_)), float(np.min(edges_))
+        assert ma_.is_integer() and mi_.is_integer()
+        ax.set_xlim([mi_-0.25, ma_+0.25])
+    for ax in axes[1:]:
+        ax.set_yticklabels([])
+    title = title or f'Training Classification Accuracy - {domain_str} evaluation'
+    plt.suptitle(title)
+    fig.supylabel('Classification Accuracy (%)')
+    fig.supxlabel('Dataset')
+
+    legend_v_ratio = 0.15
+    handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
+    label2handle = dict(zip(labels, handles))
+    label_n_handle = OrderedDict(sorted(label2handle.items(), key=lambda t: t[0]))
+    fig.legend(label_n_handle.values(), label_n_handle.keys(), loc='lower center', bbox_transform=fig.transFigure)
+    plt.subplots_adjust(bottom=legend_v_ratio)
+    plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
+    if save:
+        plt.savefig(os_join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
     else:
         plt.show()
 
 
 if __name__ == '__main__':
+    import os
+
     from icecream import ic
-
-    from chore.util import *
-
-    # dnm = 'slurp'
-    # dnm = 'yahoo'
 
     def pick_cmap():
         cmaps = [
@@ -95,87 +169,19 @@ if __name__ == '__main__':
             'twilight_shifted'
         ]
         for cm in cmaps:
-            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os.path.join(get_chore_base(), 'plot'))
+            plot_class_heatmap('slurp', cmap=cm, save=True, dir_save=os_join(get_chore_base(), 'plot'))
 
-    # plot_class_heatmap(dnm, save=False, dir_save=os.path.join(path_base, 'plot'))
+    # plot_class_heatmap(dnm, save=False, dir_save=os_join(path_base, 'plot'))
 
     def save_plots(model_name, strategy):
         fn = get_dnm2csv_path_fn(model_name, strategy)
         md_nm, strat = prettier_setup(model_name, strategy)
-        dir_save = os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
+        dir_save = os_join(get_chore_base(), 'plot', f'{now(for_path=True)}, {md_nm} with {strat}')
         os.makedirs(dir_save, exist_ok=True)
         for dnm_ in sconfig('UTCD.datasets'):
             plot_class_heatmap(dnm_, save=True, dir_save=dir_save, dnm2csv_path=fn, approach=strategy)
     # save_plots(split='neg-samp', approach='Random Negative Sampling')
 
-    def plot_setups_acc(
-            setups: List[Dict[str, str]], domain: str = 'in',
-            train_strategy: str = 'vanilla', train_description: str = '3ep',
-            save=False,
-            color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
-            title: str = None,
-    ):
-        ca(dataset_domain=domain)
-
-        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
-        fig, axes = plt.subplots(1, len(aspect2dnms), constrained_layout=False)
-        # color-code by model name
-        color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
-        cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
-        if isinstance(pretty_keys, str):
-            pretty_keys = (pretty_keys,)
-
-        for ax, (aspect, dnms) in zip(axes, aspect2dnms.items()):
-            for s in setups:
-                md_nm, sample_strat = s['model_name'], s['sampling_strategy']
-                train_strat = s.get('training_strategy', train_strategy)
-                train_desc = s.get('train_description', train_description)
-                ca(model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy)
-                path = get_dnm2csv_path_fn(
-                    model_name=md_nm, sampling_strategy=sample_strat, domain=domain,
-                    training_strategy=train_strat, train_description=train_desc
-                )
-                # As percentage
-                scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
-                dnm_ints = list(range(len(dnms)))
-                ls = s.get('line_style', ':' if sample_strat == 'vect' else '-')
-                i_color = color_opns.index(s[color_code_by])
-                d_pretty = {k: s[k] for k in pretty_keys}
-                label = prettier_setup(md_nm, **d_pretty, pprint=True)
-                post = s.get('label_postfix', '')
-                label = f'{label}{post}'
-                ax.plot(dnm_ints, scores, c=cs[i_color], ls=ls, lw=1, marker='.', ms=8, label=label)
-            dnm_ints = list(range(len(dnms)))
-            ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
-            ax.set_title(f'{aspect} split')
-        scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
-        edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
-        ma, mi = np.max(scores), np.min(scores)
-        ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
-        for ax, edges_ in zip(axes, edges):
-            ax.set_ylim([mi, ma])
-            ma_, mi_ = float(np.max(edges_)), float(np.min(edges_))
-            assert ma_.is_integer() and mi_.is_integer()
-            ax.set_xlim([mi_-0.25, ma_+0.25])
-        for ax in axes[1:]:
-            ax.set_yticklabels([])
-        title = title or f'Training Classification Accuracy - {domain_str} evaluation'
-        plt.suptitle(title)
-        fig.supylabel('Classification Accuracy (%)')
-        fig.supxlabel('Dataset')
-
-        legend_v_ratio = 0.15
-        handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
-        label2handle = dict(zip(labels, handles))
-        label_n_handle = OrderedDict(sorted(label2handle.items(), key=lambda t: t[0]))
-        fig.legend(label_n_handle.values(), label_n_handle.keys(), loc='lower center', bbox_transform=fig.transFigure)
-        plt.subplots_adjust(bottom=legend_v_ratio)
-        plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
-        if save:
-            plt.savefig(os.path.join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
-        else:
-            plt.show()
     # plot_approaches_performance(save=True)
     # plot_approaches_performance(setups_in, in_domain=True, save=False)
 

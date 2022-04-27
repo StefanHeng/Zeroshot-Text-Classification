@@ -1,12 +1,17 @@
 import os
 import json
+from os.path import join as os_join
 from typing import List, Dict, Iterable, Union
 from zipfile import ZipFile
+from collections import Counter
 
+import numpy as np
 import pandas as pd
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
-
+import spacy
 import gdown
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from stefutil import *
 from zeroshot_encoder.util.util import *
@@ -20,21 +25,21 @@ def get_output_base():
         return '/data'
     elif 'arc-ts' in hnm:  # Great Lakes; `profmars0` picked arbitrarily among [`profmars0`, `profmars1`]
         # Per https://arc.umich.edu/greatlakes/user-guide/
-        return os.path.join('/scratch', 'profmars_root', 'profmars0', 'stefanhg')
+        return os_join('/scratch', 'profmars_root', 'profmars0', 'stefanhg')
     else:
         return BASE_PATH
 
 
 def get_utcd_from_gdrive(domain: str = 'in'):
     ca(domain=domain)
-    path = os.path.join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD')
+    path = os_join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD')
     os.makedirs(path, exist_ok=True)
     if domain == 'in':
         url = 'https://drive.google.com/uc?id=1V7IzdZ9HQbFUQz9NzBDjmqYBdPd9Yfe3'
-        fnm = os.path.join(path, 'in-domain')
+        fnm = os_join(path, 'in-domain')
     else:
         url = 'https://drive.google.com/uc?id=1nd32_UrFbgoCgH4bDtFFD_YFZhzcts3x'
-        fnm = os.path.join(path, 'out-of-domain')
+        fnm = os_join(path, 'out-of-domain')
     fnm = f'{fnm}.zip'
     gdown.download(url=url, output=fnm, quiet=False)
     with ZipFile(fnm, 'r') as zip_:
@@ -58,14 +63,14 @@ def process_utcd_dataset(domain: str = 'in', join=False):
     ca(domain=domain)
     output_dir = 'UTCD-in' if domain == 'in' else 'UTCD-out'
     ext = sconfig('UTCD.dataset_ext')
-    path_dsets = os.path.join(BASE_PATH, PROJ_DIR, DSET_DIR)
-    path_out = os.path.join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed')
+    path_dsets = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
+    path_out = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed')
     logger.info(f'Processing UTCD datasets with {log_dict(dict(domain=domain, join=join))}... ')
 
     def path2dsets(dnm: str, d_dset: Dict) -> Union[DatasetDict, Dict[str, pd.DataFrame]]:
         logger.info(f'Processing dataset {logi(dnm)}... ')
         path = d_dset['path']
-        path = os.path.join(path_dsets, f'{path}.{ext}')
+        path = os_join(path_dsets, f'{path}.{ext}')
         with open(path) as f:
             dsets_: Dict = json.load(f)
 
@@ -121,10 +126,10 @@ def process_utcd_dataset(domain: str = 'in', join=False):
         tr = dfs2dset([prep_single(dnm, dsets['train']) for dnm, dsets in d_dsets.items()])
         vl = dfs2dset([prep_single(dnm, dsets['test']) for dnm, dsets in d_dsets.items()])
         dsets = DatasetDict(train=tr, test=vl)
-        dsets.save_to_disk(os.path.join(path_out, output_dir))
+        dsets.save_to_disk(os_join(path_out, output_dir))
     else:
         for dnm, dsets in d_dsets.items():
-            dsets.save_to_disk(os.path.join(path_out, dnm))
+            dsets.save_to_disk(os_join(path_out, dnm))
     logger.info(f'Dataset(s) saved to {logi(path_out)}')
 
 
@@ -132,15 +137,15 @@ def map_ag_news():
     dnm = 'ag_news'
     d_dset = sconfig(f'UTCD.datasets.{dnm}')
     ext = sconfig('UTCD.dataset_ext')
-    path_dset = os.path.join(BASE_PATH, PROJ_DIR, DSET_DIR)
+    path_dset = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
     path = d_dset['path']
-    path = os.path.join(path_dset, f'{path}.{ext}')
+    path = os_join(path_dset, f'{path}.{ext}')
     with open(path) as f:
         dsets: Dict = json.load(f)
     d_lb2desc = sconfig(f'baselines.gpt2-nvidia.label-descriptors.{dnm}')
     for split, dset in dsets.items():
         dsets[split] = [[txt, d_lb2desc[lb]] for txt, lb in dset]
-    with open(os.path.join(path_dset, f'{dnm}.json'), 'w') as f:
+    with open(os_join(path_dset, f'{dnm}.json'), 'w') as f:
         json.dump(dsets, f, indent=4)
 
 
@@ -158,13 +163,94 @@ def get_utcd_info() -> pd.DataFrame:
     return pd.DataFrame(infos)
 
 
+def get_utcd_overlap() -> pd.DataFrame:
+    """
+    A normalized score for overlap, between each out-of-domain dataset,
+        with each in-domain datasets and aggregated across all in-domain datasets
+
+    Intended to get a sense of performance over overlap
+    """
+    nlp = spacy.load('en_core_web_sm')
+
+    def s2lemma(s: str) -> List[str]:
+        # TODO: 1) `&` isn't a stop word? 2) lowercase everything? 3) remove characters?
+        return [token.lemma_ for token in nlp(s)]
+
+    def _dnm2lemma_count(dnm: str, split: str) -> Dict[str, int]:
+        return Counter(sum([s2lemma(lb) for lb in sconfig(f'UTCD.datasets.{dnm}.splits.{split}.labels')], start=[]))
+
+    in_dnms = [k for k, d in sconfig('UTCD.datasets').items() if d['domain'] == 'in']
+    out_dnms = [k for k, d in sconfig('UTCD.datasets').items() if d['domain'] == 'out']
+    dnm2lemma_count = {dnm: _dnm2lemma_count(dnm, 'train') for dnm in in_dnms}
+    dnm2lemma_count |= {dnm: _dnm2lemma_count(dnm, 'test') for dnm in out_dnms}
+    # See below, weighted by #samples for each in-domain dataset; TODO: weight also by label support?
+    in_dnm2train_n_tok = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_pair') for dnm in in_dnms}
+    # ic(dnm2lemma_count)
+    lst_rows = []
+    for dnm_out in out_dnms:
+        d_row = dict()
+        for dnm_in in in_dnms:
+            inter = set(dnm2lemma_count[dnm_out]) & set(dnm2lemma_count[dnm_in])
+            # Considers the count for both datasets
+            numer = sum(dnm2lemma_count[dnm_in][i] for i in inter) + sum(dnm2lemma_count[dnm_out][i] for i in inter)
+            denom = sum(dnm2lemma_count[dnm_in].values()) + sum(dnm2lemma_count[dnm_out].values())
+            d_row[dnm_in] = score = numer / denom  # 2x for normalization in [0, 1]
+            # ic(dnm_out, dnm_in, inter, score)
+            # ic(dnm_out, dnm_in, score)
+        dnms, vals = zip(*d_row.items())
+        # ic(dnms, vals)
+        d_row['average'] = np.mean(vals)
+        d_row['weighted_average'] = np.average(vals, weights=[in_dnm2train_n_tok[dnm] for dnm in dnms])
+        d_row['dataset_name'] = dnm_out
+        lst_rows.append(d_row)
+    return pd.DataFrame(lst_rows).set_index('dataset_name')
+
+
+def plot_utcd_overlap(save: bool = False) -> None:
+    d_dset = sconfig('UTCD.datasets')
+
+    def dnm2dnm_print(dnm: str) -> str:
+        if dnm in d_dset:
+        #     domain = get(d_dset, f'{dnm}.domain')
+        #     domain = 'in domain' if domain == 'in' else 'out of domain'
+        #     domain = rf'$\it{{{domain.capitalize()}}}$'
+        #     dnm = dnm.replace('_', '\n')
+        #     return f'{domain}\n{dnm}'
+            return dnm.replace('_', '\n')
+        else:
+            words = dnm.split('_')
+            return '\n'.join(rf'$\it{{{wd}}}$' for wd in words)
+    df = get_utcd_overlap()
+    df *= 100
+    df.rename(lambda s: dnm2dnm_print(s), axis=1, inplace=True)
+    df.rename(lambda s: dnm2dnm_print(s), axis=0, inplace=True)
+    # plt.figure(figsize=(10, 9))
+    fig, (ax, ax_cbar) = plt.subplots(1, 2, figsize=(11, 9), gridspec_kw=dict(width_ratios=[20, 0.5]))
+    sns.heatmap(df, annot=True, cmap='mako', fmt='.1f', square=True, ax=ax, cbar_ax=ax_cbar)
+    ax.xaxis.set_ticks_position('top')
+    ax.xaxis.set_label_position('top')
+    # ax.tick_params(top=False, labelbottom=False, labeltop=True)
+    plt.yticks(rotation=0)
+    title = 'Out-of-domain eval datasets label overlap against In-domain training datasets'
+    plt.suptitle(title)
+    ax.set_xlabel('In-domain dataset')
+    ax.set_ylabel('Out-of-domain dataset')
+    ax_cbar.set_ylabel('Overlap Score (%)')
+    if save:
+        save_fig(title)
+    else:
+        plt.show()
+
+
 if __name__ == '__main__':
     from icecream import ic
 
     from datasets import load_from_disk
 
+    ic.lineWrapWidth = 512
+
     def sanity_check(dsets_nm):
-        path = os.path.join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dsets_nm)
+        path = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dsets_nm)
         ic(path)
         dset = load_from_disk(path)
         te, vl = dset['train'], dset['test']
@@ -178,20 +264,20 @@ if __name__ == '__main__':
     def get_utcd_in():
         process_utcd_dataset(domain='in', join=False)
         sanity_check('UTCD-in')
-    get_utcd_in()
+    # get_utcd_in()
 
     # get_utcd_from_gdrive(domain='out')
 
     def get_utcd_out():
         process_utcd_dataset(domain='out', join=False)
         sanity_check('UTCD-out')
-    get_utcd_out()
+    # get_utcd_out()
 
     # process_utcd_dataset(in_domain=True, join=False)
     # process_utcd_dataset(in_domain=False, join=False)
 
     def sanity_check_ln_eurlex():
-        path = os.path.join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', 'multi_eurlex')
+        path = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', 'multi_eurlex')
         ic(path)
         dset = load_from_disk(path)
         ic(dset, len(dset))
@@ -201,7 +287,7 @@ if __name__ == '__main__':
     def output_utcd_info():
         df = get_utcd_info()
         ic(df)
-        df.to_csv(os.path.join(BASE_PATH, PROJ_DIR, DSET_DIR, 'utcd-info.csv'), float_format='%.3f')
+        df.to_csv(os_join(BASE_PATH, PROJ_DIR, DSET_DIR, 'utcd-info.csv'), float_format='%.3f')
     # output_utcd_info()
 
     def fix_amazon_polarity():
@@ -216,7 +302,7 @@ if __name__ == '__main__':
         #              "motion of tool, the ends of the little piece of sandpaper do all the work and the center does " \
         #              "nothing. "
         wicked_lb = {'positive', 'negative'}
-        path = os.path.join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD', 'out-of-domain', 'amazon_polarity.json')
+        path = os_join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD', 'out-of-domain', 'amazon_polarity.json')
         with open(path, 'r') as f:
             dset = json.load(f)
         wicked_txts = []
@@ -232,3 +318,24 @@ if __name__ == '__main__':
         with open(path, 'w') as f:
             json.dump(dset, f)
     # fix_amazon_polarity()
+
+    def chore_check_multi_label():
+        """
+        Some datasets have only a tiny fraction of multi-label samples in the training split,
+            which might not be intended after processing
+        """
+        dnms = ['sentiment_tweets_2020', 'slurp', 'patent']
+        path_dset = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
+        for dnm in dnms:
+            d = sconfig(f'UTCD.datasets.{dnm}')
+            path = os_join(path_dset, f'{d["path"]}.json')
+            with open(path) as fl:
+                dsets: Dict = json.load(fl)['train']
+            for text, labels in dsets.items():
+                if len(labels) > 1:
+                    d = dict(dset=dnm, labels=labels, text=text)
+                    print(log_dict(d))
+    # chore_check_multi_label()
+
+    # ic(get_utcd_overlap())
+    plot_utcd_overlap(save=True)

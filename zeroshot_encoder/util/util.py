@@ -18,6 +18,7 @@ sconfig = StefConfig(config_file=os_join(BASE_PATH, PROJ_DIR, PKG_NM, 'util', 'c
 u = StefUtil(
     base_path=BASE_PATH, project_dir=PROJ_DIR, package_name=PKG_NM, dataset_dir=DSET_DIR, model_dir=MODEL_DIR
 )
+u.plot_path = os_join(BASE_PATH, PROJ_DIR, 'chore', 'plot')
 save_fig = u.save_fig
 
 for d in sconfig('check-arg'):
