@@ -31,6 +31,8 @@ class ChoreConfig:
             ])
         }
         d_dset_names_all = deepcopy(d_dset_names)
+        # shuffle = 'ori'
+        shuffle = 'new'
         # intended for writing out table, will write all the data
         d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
         self.config_dict = {
@@ -47,8 +49,12 @@ class ChoreConfig:
             'train-setup2dset-eval-path': OrderedDict({
                 ('binary-bert', 'rand', 'vanilla', 'in', '3ep'):
                     ['binary-bert', 'rand, vanilla', 'in-domain, 03.24.22'],
+                ('binary-bert', 'rand', 'vanilla', 'in', '5ep'):
+                    ['binary-bert', f'rand, vanilla, 5ep, {shuffle}-shuffle', 'in-domain, 04.26.22'],
                 ('binary-bert', 'rand', 'vanilla', 'out', '3ep'):
                     ['binary-bert', 'rand, vanilla', 'out-of-domain, 04.06.22'],
+                ('binary-bert', 'rand', 'vanilla', 'out', '5ep'):
+                    ['binary-bert',  f'rand, vanilla, 5ep, {shuffle}-shuffle', 'out-of-domain, 04.26.22'],
                 ('binary-bert', 'rand', 'implicit', 'in', '3ep'):
                     ['binary-bert', 'rand, implicit', 'in-domain, 04.09.22'],
                 ('binary-bert', 'rand', 'implicit', 'in', '5ep'):

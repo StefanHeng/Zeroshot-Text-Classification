@@ -228,13 +228,13 @@ if __name__ == '__main__':
         if with_5ep:
             _setups = [
                 ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
-                ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '3ep', ':', ' for 3 epochs'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '3ep', ':', ' for 3 epochs'),
-                # Vanilla to 5 ep not trained
-                ('binary-bert', 'rand', 'implicit', '5ep', '-', ' for 5 epochs'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '5ep', '-', ' for 5 epochs'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '5ep', '-', ' for 5 epochs')
+                # ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '3ep', ':', ' for 3 epochs'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '3ep', ':', ' for 3 epochs'),
+                ('binary-bert', 'rand', 'vanilla', '5ep', '-', ' for 5 epochs'),
+                # ('binary-bert', 'rand', 'implicit', '5ep', '-', ' for 5 epochs'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '5ep', '-', ' for 5 epochs'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '5ep', '-', ' for 5 epochs')
             ]
             keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
             keys += ['line_style', 'label_postfix']
@@ -250,12 +250,12 @@ if __name__ == '__main__':
         # ic(setups)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
+        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling, new shuffle'
         plot_setups_acc(
-            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
             title=title
         )
     # plot_berts_implicit(domain='in')
     # plot_berts_implicit(domain='out')
-    plot_berts_implicit(domain='in', with_5ep=True)
-    # plot_berts_implicit(domain='out', with_5ep=True)
+    # plot_berts_implicit(domain='in', with_5ep=True)
+    plot_berts_implicit(domain='out', with_5ep=True)

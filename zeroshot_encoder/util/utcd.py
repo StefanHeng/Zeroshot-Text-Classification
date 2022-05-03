@@ -3,6 +3,7 @@ import json
 from os.path import join as os_join
 from typing import List, Dict, Iterable, Union
 from zipfile import ZipFile
+from statistics import harmonic_mean
 from collections import Counter
 
 import numpy as np
@@ -12,6 +13,7 @@ import spacy
 import gdown
 import matplotlib.pyplot as plt
 import seaborn as sns
+from tqdm import tqdm
 
 from stefutil import *
 from zeroshot_encoder.util.util import *
@@ -163,75 +165,115 @@ def get_utcd_info() -> pd.DataFrame:
     return pd.DataFrame(infos)
 
 
-def get_utcd_overlap() -> pd.DataFrame:
+def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFrame:
     """
     A normalized score for overlap, between each out-of-domain dataset,
         with each in-domain datasets and aggregated across all in-domain datasets
 
     Intended to get a sense of performance over overlap
     """
-    nlp = spacy.load('en_core_web_sm')
+    ca.check_mismatch('Overlap Type', kind, ['label', 'text'])
+    ca.check_mismatch('Overlap Metric', metric, ['harmonic', 'absolute'])
+    path_dset = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
+    logger = get_logger('Get UTCD Overlap')
 
-    def s2lemma(s: str) -> List[str]:
+    in_dnms = [dnm for dnm, d in sconfig('UTCD.datasets').items() if d['domain'] == 'in']
+    out_dnms = [dnm for dnm, d in sconfig('UTCD.datasets').items() if d['domain'] == 'out']
+    # for in-domain, the training split, for out-of-domain, the test split
+    dnm2n_txt = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_text') for dnm in in_dnms}
+    dnm2n_txt |= {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.test.n_text') for dnm in out_dnms}
+
+    def s2lemma(nlp, s: str) -> List[str]:
         # TODO: 1) `&` isn't a stop word? 2) lowercase everything? 3) remove characters?
         return [token.lemma_ for token in nlp(s)]
 
-    def _dnm2lemma_count(dnm: str, split: str) -> Dict[str, int]:
-        return Counter(sum([s2lemma(lb) for lb in sconfig(f'UTCD.datasets.{dnm}.splits.{split}.labels')], start=[]))
-
-    in_dnms = [k for k, d in sconfig('UTCD.datasets').items() if d['domain'] == 'in']
-    out_dnms = [k for k, d in sconfig('UTCD.datasets').items() if d['domain'] == 'out']
-    dnm2lemma_count = {dnm: _dnm2lemma_count(dnm, 'train') for dnm in in_dnms}
-    dnm2lemma_count |= {dnm: _dnm2lemma_count(dnm, 'test') for dnm in out_dnms}
-    # See below, weighted by #samples for each in-domain dataset; TODO: weight also by label support?
-    in_dnm2train_n_tok = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_pair') for dnm in in_dnms}
-    # ic(dnm2lemma_count)
+    def _dnm2lemma_count(dnm_: str, split: str) -> Dict[str, int]:
+        if kind == 'label':
+            it = sconfig(f'UTCD.datasets.{dnm_}.splits.{split}.labels')
+        else:  # text
+            d = sconfig(f'UTCD.datasets.{dnm_}')
+            path = os_join(path_dset, f'{d["path"]}.json')
+            with open(path) as fl:
+                it = json.load(fl)[split].keys()
+        c = Counter()
+        # if kind == 'label':
+        nlp = spacy.load('en_core_web_sm')
+        nlp.max_length *= 10  # for `multi_eurlex`
+        for s in tqdm(it, desc=f'Lemmatizing {dnm_}'):
+            c.update(s2lemma(nlp, s))
+        # else:
+        #     # concurrency for huge # of texts; but no speed-up
+        #     n_pr = dnm2n_txt[dnm_]
+        #     arr = np.empty(n_pr, dtype=object)
+        #     for i, e in enumerate(it):
+        #         arr[i] = e
+        #     ic(arr.shape)
+        #     pbar = tqdm(total=n_pr, desc=f'Lemmatizing {dnm_}')
+        #
+        #     nlp_ = spacy.load('en_core_web_sm')
+        #     nlp_.max_length *= 10  # for `multi_eurlex`
+        #
+        #     def batched_count(arr_: np.ndarray) -> List[Counter]:
+        #         ct = Counter()
+        #         for s_ in arr_:
+        #             ct.update(s2lemma(nlp_, s_))
+        #         return [ct]
+        #     cs = batched_conc_map(batched_count, arr, is_batched_fn=True, with_tqdm=pbar, batch_size=64)
+        #     for c_ in cs:
+        #         c.update(c_)
+        return c
+        # return Counter(chain_its(s2lemma(s) for s in it))
+    dnm2lemma_count = dict()
+    for dnm in in_dnms:
+        logger.info(f'Lemmatizing {logi("in-domain")} dataset {logi(dnm)}, {logi("train")} split on {logi(kind)}s')
+        dnm2lemma_count[dnm] = _dnm2lemma_count(dnm, 'train')
+    for dnm in out_dnms:
+        logger.info(f'Lemmatizing {logi("out-of-domain")} dataset {logi(dnm)}, {logi("test")} split on {logi(kind)}s')
+        dnm2lemma_count[dnm] = _dnm2lemma_count(dnm, 'test')
     lst_rows = []
+    # See below, weighted by #samples for each in-domain dataset; TODO: weight also by label support?
+    in_dnm2n_pr = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_pair') for dnm in in_dnms}
     for dnm_out in out_dnms:
         d_row = dict()
         for dnm_in in in_dnms:
             inter = set(dnm2lemma_count[dnm_out]) & set(dnm2lemma_count[dnm_in])
             # Considers the count for both datasets
-            numer = sum(dnm2lemma_count[dnm_in][i] for i in inter) + sum(dnm2lemma_count[dnm_out][i] for i in inter)
-            denom = sum(dnm2lemma_count[dnm_in].values()) + sum(dnm2lemma_count[dnm_out].values())
-            d_row[dnm_in] = score = numer / denom  # 2x for normalization in [0, 1]
-            # ic(dnm_out, dnm_in, inter, score)
-            # ic(dnm_out, dnm_in, score)
+            n_inter_in = sum(dnm2lemma_count[dnm_in][i] for i in inter)
+            n_inter_out = sum(dnm2lemma_count[dnm_out][i] for i in inter)
+            n_in, n_out = sum(dnm2lemma_count[dnm_in].values()), sum(dnm2lemma_count[dnm_out].values())
+            # also ensure in range [0, 1]
+            if metric == 'harmonic':
+                d_row[dnm_in] = harmonic_mean([n_inter_in / n_in, n_inter_out / n_out])
+            else:
+                assert metric == 'absolute'
+                d_row[dnm_in] = (n_inter_in + n_inter_out) / (n_in + n_out)
         dnms, vals = zip(*d_row.items())
-        # ic(dnms, vals)
         d_row['average'] = np.mean(vals)
-        d_row['weighted_average'] = np.average(vals, weights=[in_dnm2train_n_tok[dnm] for dnm in dnms])
+        d_row['weighted_average'] = np.average(vals, weights=[in_dnm2n_pr[dnm] for dnm in dnms])
         d_row['dataset_name'] = dnm_out
         lst_rows.append(d_row)
     return pd.DataFrame(lst_rows).set_index('dataset_name')
 
 
-def plot_utcd_overlap(save: bool = False) -> None:
+def plot_utcd_overlap(kind: str = 'label', metric: str = 'harmonic', save: bool = False) -> None:
     d_dset = sconfig('UTCD.datasets')
 
     def dnm2dnm_print(dnm: str) -> str:
         if dnm in d_dset:
-        #     domain = get(d_dset, f'{dnm}.domain')
-        #     domain = 'in domain' if domain == 'in' else 'out of domain'
-        #     domain = rf'$\it{{{domain.capitalize()}}}$'
-        #     dnm = dnm.replace('_', '\n')
-        #     return f'{domain}\n{dnm}'
             return dnm.replace('_', '\n')
         else:
             words = dnm.split('_')
             return '\n'.join(rf'$\it{{{wd}}}$' for wd in words)
-    df = get_utcd_overlap()
+    df = get_utcd_overlap(kind=kind, metric=metric)
     df *= 100
     df.rename(lambda s: dnm2dnm_print(s), axis=1, inplace=True)
     df.rename(lambda s: dnm2dnm_print(s), axis=0, inplace=True)
-    # plt.figure(figsize=(10, 9))
-    fig, (ax, ax_cbar) = plt.subplots(1, 2, figsize=(11, 9), gridspec_kw=dict(width_ratios=[20, 0.5]))
+    fig, (ax, ax_cbar) = plt.subplots(1, 2, figsize=(10+0.25, 8), gridspec_kw=dict(width_ratios=[10, 0.25]))
     sns.heatmap(df, annot=True, cmap='mako', fmt='.1f', square=True, ax=ax, cbar_ax=ax_cbar)
     ax.xaxis.set_ticks_position('top')
     ax.xaxis.set_label_position('top')
-    # ax.tick_params(top=False, labelbottom=False, labeltop=True)
-    plt.yticks(rotation=0)
-    title = 'Out-of-domain eval datasets label overlap against In-domain training datasets'
+    ax.tick_params(axis='y', labelrotation=0)
+    title = f'Out-of-domain eval datasets {kind.capitalize()} overlap against In-domain training datasets'
     plt.suptitle(title)
     ax.set_xlabel('In-domain dataset')
     ax.set_ylabel('Out-of-domain dataset')
@@ -338,4 +380,8 @@ if __name__ == '__main__':
     # chore_check_multi_label()
 
     # ic(get_utcd_overlap())
-    plot_utcd_overlap(save=True)
+    # kd = 'label'
+    kd = 'text'
+    # plot_utcd_overlap(kind=kd, save=False)
+    plot_utcd_overlap(kind=kd, save=True)
+    # profile_runtime(lambda: get_utcd_overlap(kind=kd))
