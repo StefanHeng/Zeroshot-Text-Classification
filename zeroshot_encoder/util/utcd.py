@@ -1,19 +1,20 @@
 import os
 import json
 from os.path import join as os_join
-from typing import List, Dict, Iterable, Union
+from typing import List, Dict, Iterable, Callable, Any, Union
 from zipfile import ZipFile
 from statistics import harmonic_mean
 from collections import Counter
 
 import numpy as np
 import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 import spacy
 import gdown
 import matplotlib.pyplot as plt
 import seaborn as sns
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from stefutil import *
 from zeroshot_encoder.util.util import *
@@ -165,7 +166,9 @@ def get_utcd_info() -> pd.DataFrame:
     return pd.DataFrame(infos)
 
 
-def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFrame:
+def get_utcd_overlap(
+        kind: str = 'label', metric: str = 'harmonic', stat='tfidf', stat_args: Dict = None
+) -> pd.DataFrame:
     """
     A normalized score for overlap, between each out-of-domain dataset,
         with each in-domain datasets and aggregated across all in-domain datasets
@@ -174,8 +177,23 @@ def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFr
     """
     ca.check_mismatch('Overlap Type', kind, ['label', 'text'])
     ca.check_mismatch('Overlap Metric', metric, ['harmonic', 'absolute'])
+    ca.check_mismatch('Word Statistics', stat, ['count', 'tfidf'])
     path_dset = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
     logger = get_logger('Get UTCD Overlap')
+    logger.info(f'Getting UTCD Overlap for {log_dict(kind=kind, metric=metric, stat=stat, stat_args=stat_args)}')
+    if stat == 'tfidf':
+        def tokenize(pbar) -> Callable:
+            def _tokenize(txt: str) -> List[str]:
+                lst = [tok.lemma_ for tok in nlp(txt) if not tok.is_stop]
+                pbar.update(1)
+                return lst
+            return _tokenize
+        # TODO: tweak?
+        stat_args: Dict[str, Any] = stat_args if stat_args is not None else dict(max_df=0.8, min_df=3)
+        assert 'token_pattern' not in stat_args and 'tokenizer' not in stat_args
+        stat_args['token_pattern'] = None
+    elif stat_args is not None:
+        raise NotImplementedError(f'{logi("stat_args")} supported for {logi("tfidf")} only')
 
     in_dnms = [dnm for dnm, d in sconfig('UTCD.datasets').items() if d['domain'] == 'in']
     out_dnms = [dnm for dnm, d in sconfig('UTCD.datasets').items() if d['domain'] == 'out']
@@ -183,46 +201,33 @@ def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFr
     dnm2n_txt = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_text') for dnm in in_dnms}
     dnm2n_txt |= {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.test.n_text') for dnm in out_dnms}
 
-    def s2lemma(nlp, s: str) -> List[str]:
-        # TODO: 1) `&` isn't a stop word? 2) lowercase everything? 3) remove characters?
-        return [token.lemma_ for token in nlp(s)]
+    nlp = spacy.load('en_core_web_sm')
+    nlp.max_length *= 10  # for `multi_eurlex`
 
-    def _dnm2lemma_count(dnm_: str, split: str) -> Dict[str, int]:
+    def _dnm2lemma_count(dnm_: str, split: str) -> Union[Counter, TfidfVectorizer]:
         if kind == 'label':
             it = sconfig(f'UTCD.datasets.{dnm_}.splits.{split}.labels')
+            total = len(it)
         else:  # text
             d = sconfig(f'UTCD.datasets.{dnm_}')
             path = os_join(path_dset, f'{d["path"]}.json')
             with open(path) as fl:
                 it = json.load(fl)[split].keys()
-        c = Counter()
-        # if kind == 'label':
-        nlp = spacy.load('en_core_web_sm')
-        nlp.max_length *= 10  # for `multi_eurlex`
-        for s in tqdm(it, desc=f'Lemmatizing {dnm_}'):
-            c.update(s2lemma(nlp, s))
-        # else:
-        #     # concurrency for huge # of texts; but no speed-up
-        #     n_pr = dnm2n_txt[dnm_]
-        #     arr = np.empty(n_pr, dtype=object)
-        #     for i, e in enumerate(it):
-        #         arr[i] = e
-        #     ic(arr.shape)
-        #     pbar = tqdm(total=n_pr, desc=f'Lemmatizing {dnm_}')
-        #
-        #     nlp_ = spacy.load('en_core_web_sm')
-        #     nlp_.max_length *= 10  # for `multi_eurlex`
-        #
-        #     def batched_count(arr_: np.ndarray) -> List[Counter]:
-        #         ct = Counter()
-        #         for s_ in arr_:
-        #             ct.update(s2lemma(nlp_, s_))
-        #         return [ct]
-        #     cs = batched_conc_map(batched_count, arr, is_batched_fn=True, with_tqdm=pbar, batch_size=64)
-        #     for c_ in cs:
-        #         c.update(c_)
-        return c
-        # return Counter(chain_its(s2lemma(s) for s in it))
+            total = dnm2n_txt[dnm_]
+        pbar_args = dict(desc=f'Lemmatizing {dnm_}', unit='sample', total=total, miniters=64)
+        if stat == 'count':
+            c = Counter()
+            for s in tqdm(it, **pbar_args):
+                # TODO: 1) `&` isn't a stop word? 2) lowercase everything? 3) remove characters?
+                c.update(tok.lemma_ for tok in nlp(s) if not tok.is_stop)
+            return c
+        else:  # tfidf
+            pbar = tqdm(**pbar_args)
+            stat_args['tokenizer'] = tokenize(pbar)
+            v = TfidfVectorizer(**stat_args)
+            v.fit(it)
+            pbar.close()
+            return v
     dnm2lemma_count = dict()
     for dnm in in_dnms:
         logger.info(f'Lemmatizing {logi("in-domain")} dataset {logi(dnm)}, {logi("train")} split on {logi(kind)}s')
@@ -236,12 +241,20 @@ def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFr
     for dnm_out in out_dnms:
         d_row = dict()
         for dnm_in in in_dnms:
-            inter = set(dnm2lemma_count[dnm_out]) & set(dnm2lemma_count[dnm_in])
-            # Considers the count for both datasets
-            n_inter_in = sum(dnm2lemma_count[dnm_in][i] for i in inter)
-            n_inter_out = sum(dnm2lemma_count[dnm_out][i] for i in inter)
-            n_in, n_out = sum(dnm2lemma_count[dnm_in].values()), sum(dnm2lemma_count[dnm_out].values())
-            # also ensure in range [0, 1]
+            if stat == 'count':
+                c_in: Counter = dnm2lemma_count[dnm_in]
+                c_out: Counter = dnm2lemma_count[dnm_out]
+                inter = set(c_in) & set(c_out)
+                n_inter_in, n_in = sum(c_in[i] for i in inter), sum(c_in.values())
+                n_inter_out, n_out = sum(c_out[i] for i in inter), sum(c_out.values())
+            else:  # tfidf
+                v_in: TfidfVectorizer = dnm2lemma_count[dnm_in]
+                v_out: TfidfVectorizer = dnm2lemma_count[dnm_out]
+                inter = set(v_in.get_feature_names_out()) & set(v_out.get_feature_names_out())
+                idxs_in, idxs_out = [v_in.vocabulary_[i] for i in inter], [v_out.vocabulary_[i] for i in inter]
+                n_inter_in, n_in = v_in.idf_[idxs_in].sum(), v_in.idf_.sum()
+                n_inter_out, n_out = v_out.idf_[idxs_out].sum(), v_out.idf_.sum()
+            # Considers the count for both datasets; also ensure in range [0, 1]
             if metric == 'harmonic':
                 d_row[dnm_in] = harmonic_mean([n_inter_in / n_in, n_inter_out / n_out])
             else:
@@ -255,7 +268,7 @@ def get_utcd_overlap(kind: str = 'label', metric: str = 'harmonic') -> pd.DataFr
     return pd.DataFrame(lst_rows).set_index('dataset_name')
 
 
-def plot_utcd_overlap(kind: str = 'label', metric: str = 'harmonic', save: bool = False) -> None:
+def plot_utcd_overlap(kind: str = 'label', save: bool = False, **kwargs) -> None:
     d_dset = sconfig('UTCD.datasets')
 
     def dnm2dnm_print(dnm: str) -> str:
@@ -264,7 +277,7 @@ def plot_utcd_overlap(kind: str = 'label', metric: str = 'harmonic', save: bool 
         else:
             words = dnm.split('_')
             return '\n'.join(rf'$\it{{{wd}}}$' for wd in words)
-    df = get_utcd_overlap(kind=kind, metric=metric)
+    df = get_utcd_overlap(kind=kind, **kwargs)
     df *= 100
     df.rename(lambda s: dnm2dnm_print(s), axis=1, inplace=True)
     df.rename(lambda s: dnm2dnm_print(s), axis=0, inplace=True)
@@ -279,7 +292,10 @@ def plot_utcd_overlap(kind: str = 'label', metric: str = 'harmonic', save: bool 
     ax.set_ylabel('Out-of-domain dataset')
     ax_cbar.set_ylabel('Overlap Score (%)')
     if save:
-        save_fig(title)
+        mt_, st_ = kwargs.get('metric', 'harmonic'), kwargs.get('stat', 'tfidf')  # see `get_utcd_overlap`
+        mt_ = 'harm' if mt_ == 'harmonic' else 'abs'
+        st_ = 'ti' if st_ == 'tfidf' else 'ct'
+        save_fig(f'{title}, mt={mt_}, st={st_}')
     else:
         plt.show()
 
@@ -337,12 +353,6 @@ if __name__ == '__main__':
         One test sample has 2 labels, remove it
         """
         from tqdm import tqdm
-        # why doesn't pass equality????
-        # wicked_txt = "This tool is absolutely fabulous for doing the few things you will need it for, but and this is " \
-        #              "a BIG but (pun alert!) the replacement blades are VERY expensive--no joke, check the prices. " \
-        #              "The profile sanding attachment doesn\'t work worth a darn. Because of the rotary-vibratory " \
-        #              "motion of tool, the ends of the little piece of sandpaper do all the work and the center does " \
-        #              "nothing. "
         wicked_lb = {'positive', 'negative'}
         path = os_join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD', 'out-of-domain', 'amazon_polarity.json')
         with open(path, 'r') as f:
@@ -382,6 +392,13 @@ if __name__ == '__main__':
     # ic(get_utcd_overlap())
     # kd = 'label'
     kd = 'text'
-    # plot_utcd_overlap(kind=kd, save=False)
-    plot_utcd_overlap(kind=kd, save=True)
+    # st = 'count'
+    st = 'tfidf'
+    if kd == 'label':
+        args = dict()
+    else:
+        args = None
+    # sv = False
+    sv = True
+    plot_utcd_overlap(kind=kd, save=sv, stat=st, stat_args=args)
     # profile_runtime(lambda: get_utcd_overlap(kind=kd))
