@@ -5,7 +5,7 @@ from os.path import join as os_join
 from typing import List, Tuple, Dict, Iterable, Callable, Any, Union
 from zipfile import ZipFile
 from statistics import harmonic_mean
-from collections import Counter, namedtuple, defaultdict
+from collections import Counter, namedtuple, defaultdict, OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -360,7 +360,8 @@ class VisualizeOverlap:
             n_components=2, perplexity=50, learning_rate='auto', init='pca', random_state=sconfig('random-seed')
         ).fit_transform(vect)
 
-        df = pd.DataFrame(chain_its([dnm] * len(d_vect[dnm]) for dnm in dnms), columns=['dataset_name'])
+        k_dnm = 'dataset_name'
+        df = pd.DataFrame(chain_its([dnm] * len(d_vect[dnm]) for dnm in dnms), columns=[k_dnm])
         df['x'] = mapped[:, 0]
         df['y'] = mapped[:, 1]
         aspect2domain2dset = defaultdict(lambda: defaultdict(list))
@@ -372,14 +373,30 @@ class VisualizeOverlap:
         cs = cs[:n_dset_per_aspect] + cs[n_dset_per_aspect+n_gap:n_dset_per_aspect*2+n_gap] + \
             cs[n_dset_per_aspect*2+n_gap*2:-n_gap]
         dnms = []  # update order for color-coding
+        dnm2c, it_c = dict(), iter(cs)
         for i_as, aspect in enumerate(aspect2domain2dset.keys()):
             for i_dm, (domain, dnms_) in enumerate(aspect2domain2dset[aspect].items()):
                 for i_dset, dnm in enumerate(dnms_):
                     dnms.append(dnm)
-        df_col2cat_col(df, 'dataset_name', categories=dnms)  # enforce legend order
+                    # idx = i_as * n_dset_per_aspect + i_dm * sconfig('UTCD.num_dataset_per_domain_per_aspect') + i_dset
+                    # dnm2c[dnm] = next(it_c)
+                    # dnm2c[dnm] = cs[idx]
+                    # ic(aspect, domain, dnm, idx)
+        df_col2cat_col(df, k_dnm, categories=dnms)  # enforce legend order
+        # dnm2count = df[k_dnm].value_counts().to_dict()
+        # ic(dnm2count)
+        ic(dnms, cs, len(dnms), len(cs))
+        dnm2count = {k: len(v) for k, v in d_vect.items()}
+        # ic(dnm2count)
+        n_sample = sum(dnm2count.values())
+        # ic(n_sample)
+        fig_w, fig_h = 10, 12
+        ms = fig_w * fig_h * 128/n_sample
+        dnm2ms = {dnm: 1/math.log(c) * ms for dnm, c in dnm2count.items()}
+        # ic(dnm2ms)
 
-        plt.figure(figsize=(14, 9))
-        ax = sns.scatterplot(data=df, x='x', y='y', hue='dataset_name', palette=cs, s=16, alpha=0.5, legend='brief')
+        fig = plt.figure(figsize=(fig_w, fig_h), constrained_layout=False)
+        ax = sns.scatterplot(data=df, x='x', y='y', hue=k_dnm, palette=cs, size=k_dnm, sizes=dnm2ms, alpha=0.5)
 
         def confidence_ellipse(xs_, ys_, n_std=1., **kws):
             """
@@ -402,20 +419,21 @@ class VisualizeOverlap:
             return ax.add_patch(ellipse)
         txt_locs, dnm2pa = [], dict()
         for dnm, c in zip(dnms, cs):
-            xs, ys = df[df.dataset_name == dnm]['x'].values, df[df.dataset_name == dnm]['y'].values
+        # for dnm in dnms:
+        #     c = dnm2c[dnm]
+            xs, ys = df[df[k_dnm] == dnm]['x'].values, df[df[k_dnm] == dnm]['y'].values
             dnm2pa[dnm] = confidence_ellipse(xs, ys, n_std=1, fc=to_rgba(c, 0.1), ec=to_rgba(c, 0.6))
 
         inv_tsf = ax.transData.inverted()
         txts = []
         for dnm, c in zip(dnms, cs):
-            xs, ys = df[df.dataset_name == dnm]['x'].values, df[df.dataset_name == dnm]['y'].values
+        # for dnm in dnms:
+        #     c = dnm2c[dnm]
+            xs, ys = df[df[k_dnm] == dnm]['x'].values, df[df[k_dnm] == dnm]['y'].values
             pa = dnm2pa[dnm]
 
             verts = pa.get_transform().transform_path(pa.get_path()).vertices
             verts = inv_tsf.transform(verts)  # this is needed to get the vertices properly
-            # x_plot, y_plot = verts[:, 0], verts[:, 1]
-            # plt.plot(x_plot, y_plot, c=c, alpha=0.2)
-            # ic(verts)
 
             def close_to_added(x_, y_, threshold=1):
                 for x__, y__ in txt_locs:
@@ -427,32 +445,21 @@ class VisualizeOverlap:
                 other_dnms = [dnm_ for dnm_ in dnms if dnm_ != dnm]
                 for dnm_ in other_dnms:
                     pa_ = dnm2pa[dnm_]
-                    # ic('before', x_, y_)
-                    # x_, y_ = inv_tsf.transform_point((x_, y_))
-                    # x_, y_ = pa_.get_transform().inverted().transform_point((x_, y_))
-                    # ic('after', x_, y_, pa_.get_path().contains_point((x_, y_)))
                     path = pa_.get_transform().transform_path(pa_.get_path())
-                    path = inv_tsf.transform_path(path)
-                    # ic(dnm, dnm_, x_, y_, path, path.contains_point((x_, y_)))
-
-                    # if pa_.get_path().contains_point((x_, y_)):
-                    if path.contains_point((x_, y_)):
+                    if inv_tsf.transform_path(path).contains_point((x_, y_)):
                         return True
                 return False
-
             x, y, coord_found = None, None, False  # find a working coordinate to add the text
             verts = np.random.permutation(verts)
             for x, y in verts:
                 if not close_to_added(x, y, threshold=3) and not in_other_ellipse(x, y):
                     coord_found = True
-                    ic('best cord found', dnm)
                     break
             if not coord_found:
                 verts = np.random.permutation(verts)
                 for x, y in verts:
                     if not close_to_added(x, y):
                         coord_found = True
-                        ic('2nd best cord found', dnm)
                         break
             if not coord_found:
                 x, y = np.mean(xs), np.mean(ys)
@@ -470,13 +477,29 @@ class VisualizeOverlap:
             dm = rf'$\it{{{dm}}}$'
             asp = rf'$\it{{{asp}}}$'
             return f'{asp}::{dm}::{dnm}'
-        _, labels = ax.get_legend_handles_labels()
-        ax.legend(labels=[map_label(dnm) for dnm in labels], bbox_to_anchor=(1.02, 0.98))
         ax.set_aspect('equal')
         ax.set_xlabel(None)
         ax.set_ylabel(None)
         title = f'UTCD dataset Embedded {kind.capitalize()} scatter plot'
         plt.suptitle(title)
+
+        handles, labels = ax.get_legend_handles_labels()
+        ic(handles, labels, len(handles), len(labels))
+        # ax.legend(labels=[map_label(dnm) for dnm in labels], bbox_to_anchor=(1.02, 0.98))
+        l = ax.get_legend()  # need to have the seaborn legend added first
+        l.remove()
+        # l.set_title()
+        l = fig.legend(title=k_dnm.replace('_', ' '), loc='lower center', bbox_transform=fig.transFigure, ncol=3)
+        for t in l.get_texts():
+            t.set_text(map_label(t.get_text()))
+
+        legend_v_ratio = 0.15
+        # handles, labels = ax.get_legend_handles_labels()
+        # ax.legend(labels=[map_label(dnm) for dnm in labels], loc='lower center', bbox_transform=fig.transFigure)
+        plt.subplots_adjust(bottom=legend_v_ratio)
+        plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
+        # for lh in hdls:
+        #     lh._sizes = [50]
         if save:
             save_fig(title)
         else:
