@@ -14,12 +14,15 @@ from sklearn.manifold import TSNE
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 from sentence_transformers import SentenceTransformer
 import spacy
-import gdown
 import matplotlib.pyplot as plt
 from matplotlib import transforms
 from matplotlib.patches import Ellipse
+from matplotlib.colors import to_rgba
+from matplotlib.patheffects import withStroke
+from adjustText import adjust_text
 import seaborn as sns
 from tqdm.auto import tqdm
+import gdown
 
 from stefutil import *
 from zeroshot_encoder.util.util import *
@@ -343,14 +346,11 @@ class VisualizeOverlap:
             vects = np.empty(total, dtype=object)
             for i, sents in enumerate(tqdm(group_n(it, batch_size), total=total, desc=desc, unit='ba')):
                 vects[i] = model.encode(sents)
-                # ic(sents, vects, vects.shape, type(vects))
-                # exit(1)
             ret[dnm] = np.concatenate(vects)
-            # ic(ret[dnm].shape)
         return ret
 
     @staticmethod
-    def plot_utcd_embeddings(kind: str = 'label', **kwargs):
+    def plot_utcd_embeddings(kind: str = 'label', save=False, **kwargs):
         d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, **kwargs)
         in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
         dnms = in_dnms + out_dnms
@@ -359,41 +359,27 @@ class VisualizeOverlap:
         mapped = TSNE(
             n_components=2, perplexity=50, learning_rate='auto', init='pca', random_state=sconfig('random-seed')
         ).fit_transform(vect)
+
         df = pd.DataFrame(chain_its([dnm] * len(d_vect[dnm]) for dnm in dnms), columns=['dataset_name'])
         df['x'] = mapped[:, 0]
         df['y'] = mapped[:, 1]
-        plt.figure(figsize=(16, 10))
-        # n_in, n_out, n_gap = len(in_dnms), len(out_dnms), 2
-        # cs = sns.color_palette('husl', n_in + n_out + n_gap)
-        # cs = cs[:n_in] + cs[-n_out:]  # gap by color
-        # aspect2domain2dset = dict()  # for color coding
         aspect2domain2dset = defaultdict(lambda: defaultdict(list))
         for dnm, d_dset in sconfig('UTCD.datasets').items():
-            # ic(aspect2domain2dset[d_dset['aspect']])
-            # d = defaultdict(dict)
-            # ic(aspect2domain2dset[d_dset['aspect']][d_dset['domain']])
             aspect2domain2dset[d_dset['aspect']][d_dset['domain']].append(dnm)
-        # ic(aspect2domain2dset)
         n_gap = 6
-        # n_aspect = len(aspect2domain2dset)  # 3
-        # n_dset_per_aspect = len(aspect2domain2dset[next(iter(aspect2domain2dset.keys()))])  # 3
         n_aspect, n_dset_per_aspect = sconfig('UTCD.num_aspect'), sconfig('UTCD.num_dataset_per_aspect')
         cs = sns.color_palette('husl', n_aspect * (n_dset_per_aspect+n_gap))
         cs = cs[:n_dset_per_aspect] + cs[n_dset_per_aspect+n_gap:n_dset_per_aspect*2+n_gap] + \
             cs[n_dset_per_aspect*2+n_gap*2:-n_gap]
-        # ic(n_aspect, n_dset_per_aspect, len(cs))
-        dnms, dnm2color = [], dict()
+        dnms = []  # update order for color-coding
         for i_as, aspect in enumerate(aspect2domain2dset.keys()):
             for i_dm, (domain, dnms_) in enumerate(aspect2domain2dset[aspect].items()):
                 for i_dset, dnm in enumerate(dnms_):
-                    # ic(dnm)
                     dnms.append(dnm)
-                    # idx = i_as*n_dset_per_aspect + i_dm*sconfig('UTCD.num_dataset_per_domain_per_aspect') + i_dset
-                    # ic(idx)
-                    # cs.append(_cs[idx])
-        # ic(dnms)
         df_col2cat_col(df, 'dataset_name', categories=dnms)  # enforce legend order
-        ax = sns.scatterplot(data=df, x='x', y='y', hue='dataset_name', palette=cs)
+
+        plt.figure(figsize=(14, 9))
+        ax = sns.scatterplot(data=df, x='x', y='y', hue='dataset_name', palette=cs, s=16, alpha=0.5, legend='brief')
 
         def confidence_ellipse(xs_, ys_, n_std=1., **kws):
             """
@@ -407,57 +393,29 @@ class VisualizeOverlap:
             """
             cov = np.cov(xs_, ys_)
             pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
-            ell_radius_x = np.sqrt(1 + pearson)
-            ell_radius_y = np.sqrt(1 - pearson)
-            ellipse = Ellipse((0, 0), width=ell_radius_x * 2, height=ell_radius_y * 2,
-                              **(dict(fc='none') | kws))
-
-            tsf = transforms.Affine2D().rotate_deg(45)
-            tsf = tsf.scale(
-                np.sqrt(cov[0, 0]) * n_std,
-                np.sqrt(cov[1, 1]) * n_std
-            )
-            tsf = tsf.translate(np.mean(xs_), np.mean(ys_))
-
-            ic(ax.transData)
+            r_x, r_y = np.sqrt(1 + pearson), np.sqrt(1 - pearson)
+            ellipse = Ellipse((0, 0), width=r_x*2, height=r_y*2, **(dict(fc='none') | kws))
+            scl_x, scl_y = np.sqrt(cov[0, 0]) * n_std, np.sqrt(cov[1, 1]) * n_std
+            mu_x, mu_y = np.mean(xs_), np.mean(ys_)
+            tsf = transforms.Affine2D().rotate_deg(45).scale(scl_x, scl_y).translate(mu_x, mu_y)
             ellipse.set_transform(tsf + ax.transData)
-            # ellipse.set_transform(tsf)
-            return ax.add_patch(ellipse), tsf  # the transform adding `transData` doesn't seem to get vertices properly
-
-        txt_locs = []
-        dnm2ell = dict()
-
+            return ax.add_patch(ellipse)
+        txt_locs, dnm2pa = [], dict()
         for dnm, c in zip(dnms, cs):
             xs, ys = df[df.dataset_name == dnm]['x'].values, df[df.dataset_name == dnm]['y'].values
-            dnm2ell[dnm] = confidence_ellipse(xs, ys, n_std=1, fc=c, alpha=0.2)
-        _, labels = ax.get_legend_handles_labels()
-        ax.set_aspect('equal')
-        plt.gcf().canvas.draw()
+            dnm2pa[dnm] = confidence_ellipse(xs, ys, n_std=1, fc=to_rgba(c, 0.1), ec=to_rgba(c, 0.6))
 
+        inv_tsf = ax.transData.inverted()
+        txts = []
         for dnm, c in zip(dnms, cs):
             xs, ys = df[df.dataset_name == dnm]['x'].values, df[df.dataset_name == dnm]['y'].values
-            pa, tsf_ = dnm2ell[dnm]
-            # ic(pa.get_width(), pa.get_height(), pa.get_path(), pa.get_patch_transform())
-            # tsf_ = pa.get_patch_transform()
-            # tsf_ = pa.get_data_transform()
-            # tsf_ = pa.get_transform()
-            # ic(pa.get_path(), type(pa.get_path()))
-            # verts = pa.get_path().vertices
-            # ic(verts, tsf_.transform(verts))
+            pa = dnm2pa[dnm]
 
-            # path = pa.get_path()
-            # # transform = pa.get_transform()
-            # # verts = transform.transform_path(path).vertices
-            # verts = tsf_.transform_path(path).vertices
-            # ic(pa, path)
-
-            path = pa.get_path()
-            transform = pa.get_transform()
-            verts = transform.transform_path(path).vertices
-            verts = plt.gca().transData.inverted().transform(verts)
-            ic(verts)
-            x_plot, y_plot = verts[:, 0], verts[:, 1]
-            plt.plot(x_plot, y_plot, c=c, alpha=0.2)
+            verts = pa.get_transform().transform_path(pa.get_path()).vertices
+            verts = inv_tsf.transform(verts)  # this is needed to get the vertices properly
+            # x_plot, y_plot = verts[:, 0], verts[:, 1]
+            # plt.plot(x_plot, y_plot, c=c, alpha=0.2)
+            # ic(verts)
 
             def close_to_added(x_, y_, threshold=1):
                 for x__, y__ in txt_locs:
@@ -468,55 +426,61 @@ class VisualizeOverlap:
             def in_other_ellipse(x_, y_):
                 other_dnms = [dnm_ for dnm_ in dnms if dnm_ != dnm]
                 for dnm_ in other_dnms:
-                    pa_, _ = dnm2ell[dnm_]
-                    if pa_.contains_point((x_, y_)):
+                    pa_ = dnm2pa[dnm_]
+                    # ic('before', x_, y_)
+                    # x_, y_ = inv_tsf.transform_point((x_, y_))
+                    # x_, y_ = pa_.get_transform().inverted().transform_point((x_, y_))
+                    # ic('after', x_, y_, pa_.get_path().contains_point((x_, y_)))
+                    path = pa_.get_transform().transform_path(pa_.get_path())
+                    path = inv_tsf.transform_path(path)
+                    # ic(dnm, dnm_, x_, y_, path, path.contains_point((x_, y_)))
+
+                    # if pa_.get_path().contains_point((x_, y_)):
+                    if path.contains_point((x_, y_)):
                         return True
                 return False
 
             x, y, coord_found = None, None, False  # find a working coordinate to add the text
+            verts = np.random.permutation(verts)
             for x, y in verts:
-                if not close_to_added(x, y) and not in_other_ellipse(x, y):
+                if not close_to_added(x, y, threshold=3) and not in_other_ellipse(x, y):
                     coord_found = True
+                    ic('best cord found', dnm)
                     break
             if not coord_found:
+                verts = np.random.permutation(verts)
                 for x, y in verts:
                     if not close_to_added(x, y):
                         coord_found = True
+                        ic('2nd best cord found', dnm)
                         break
             if not coord_found:
                 x, y = np.mean(xs), np.mean(ys)
             txt_locs.append((x, y))
-            # ic(x, y)
-            # plt.text(
-            #     x=x, y=y, s=dnm, c=c, fontsize=10,
-            #     # bbox=dict(facecolor='#C1C5CF', alpha=0.75, edgecolor=None)
-            # )
-            plt.annotate(text=dnm,
-                         xy=(x, y),
-                         # df.loc[df.dataset_name == dnm, ['x', 'y']].mean().values,
-                         # data.loc[data['label'] == label, ['x', 'y']].mean(),
-                         ha='center',
-                         va='center',
-                         # size=20, weight='bold',
-                         # color='white',
-                         c=c,
-                         # backgroundcolor=customPalette[i]
-                     )
-            # ic(l, type(l))
+            txts.append(plt.text(x=x, y=y, s=dnm.replace('_', ' '), c=c, ha='center', va='center'))
+        adjust_text(txts)
+        for txt in txts:  # add border-color
+            txt.set_path_effects([withStroke(linewidth=1, foreground='w')])
 
         def map_label(dnm: str) -> str:
             _d_dset = sconfig(f'UTCD.datasets.{dnm}')
-            # dm = 'in-domain' if _d_dset['domain'] == 'in' else 'out-of-domain'
             dm = _d_dset['domain']
             asp = _d_dset['aspect']
             dnm = dnm.replace('_', ' ')
             dm = rf'$\it{{{dm}}}$'
             asp = rf'$\it{{{asp}}}$'
             return f'{asp}::{dm}::{dnm}'
-        ax.legend(labels=[map_label(dnm) for dnm in labels], bbox_to_anchor=(1.05, 1))
+        _, labels = ax.get_legend_handles_labels()
+        ax.legend(labels=[map_label(dnm) for dnm in labels], bbox_to_anchor=(1.02, 0.98))
+        ax.set_aspect('equal')
         ax.set_xlabel(None)
         ax.set_ylabel(None)
-        plt.show()
+        title = f'UTCD dataset Embedded {kind.capitalize()} scatter plot'
+        plt.suptitle(title)
+        if save:
+            save_fig(title)
+        else:
+            plt.show()
 
 
 if __name__ == '__main__':
@@ -525,6 +489,7 @@ if __name__ == '__main__':
     from datasets import load_from_disk
 
     ic.lineWrapWidth = 512
+    np.random.seed(sconfig('random-seed'))
 
     def sanity_check(dsets_nm):
         path = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dsets_nm)
