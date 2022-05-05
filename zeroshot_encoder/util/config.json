@@ -1724,6 +1724,11 @@
                 "gpt2-lb_avg_tokens": 6.611644906949277
             }
         },
+        "num_aspect": 3,
+        "num_dataset_per_aspect": 6,
+        "num_dataset_per_domain_per_aspect": 3,
+        "num_domain": 2,
+        "num_dataset_per_domain": 9,
         "dataset_ext": "json",
         "dataset_id2name": [
             "ag_news",
