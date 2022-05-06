@@ -130,6 +130,8 @@ config_dict = {
             consumer_finance=dict(
                 path='UTCD/out-of-domain/consumer_finance', aspect='topic', eval_labels_same=True, domain='out')
         ),
+        aspects=['sentiment', 'intent', 'topic'],
+        domains=['in', 'out'],
         num_aspect=3,
         num_dataset_per_aspect=6,
         num_dataset_per_domain_per_aspect=3,

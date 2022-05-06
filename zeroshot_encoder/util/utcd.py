@@ -5,7 +5,7 @@ from os.path import join as os_join
 from typing import List, Tuple, Dict, Iterable, Callable, Any, Union
 from zipfile import ZipFile
 from statistics import harmonic_mean
-from collections import Counter, namedtuple, defaultdict, OrderedDict
+from collections import Counter, namedtuple, defaultdict
 
 import numpy as np
 import pandas as pd
@@ -189,7 +189,7 @@ class VisualizeOverlap:
     in_dnms, out_dnms = _get_utcd_dnms()
     # for in-domain, the training split, for out-of-domain, the test split
     dnm2n_txt = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_text') for dnm in in_dnms}
-    dnm2n_txt |= {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.test.n_text') for dnm in out_dnms}
+    dnm2n_txt.update({dnm: sconfig(f'UTCD.datasets.{dnm}.splits.test.n_text') for dnm in out_dnms})
 
     def __init__(self):
         pass
@@ -330,7 +330,7 @@ class VisualizeOverlap:
             plt.show()
 
     @staticmethod
-    def get_utcd_embeddings(kind: str = 'label', batch_size: int = 16):
+    def get_utcd_embeddings(kind: str = 'label', aspect: str = None, batch_size: int = 16):
         """
         Plot sample embeddings in lower dimension
         and hopefully the overlap between each dataset cluster lines up with performance
@@ -338,7 +338,10 @@ class VisualizeOverlap:
         model = SentenceTransformer('all-mpnet-base-v2')  # per SBert package, the one with the highest quality
         in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
         ret = dict()
-        for dnm in in_dnms + out_dnms:
+        dnms = in_dnms + out_dnms
+        if aspect is not None:
+            dnms = [dnm for dnm in dnms if sconfig(f'UTCD.datasets.{dnm}.aspect') == aspect]
+        for dnm in dnms:
             split = 'train' if dnm in in_dnms else 'test'
             it, total = VisualizeOverlap.dnm2samples_n_total(dnm, kind, split)
             total = math.ceil(total/batch_size)
@@ -350,14 +353,26 @@ class VisualizeOverlap:
         return ret
 
     @staticmethod
-    def plot_utcd_embeddings(kind: str = 'label', save=False, **kwargs):
-        d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, **kwargs)
-        in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
-        dnms = in_dnms + out_dnms
+    def plot_utcd_embeddings(kind: str = 'label', save=False, aspect: str = None, cs: List = None, **kwargs):
+        """
+        :param kind: Encode either text or label
+        :param save: If true, plot is saved
+        :param aspect: If given, plot only one aspect
+        :param cs: A list of colors for each cluster
+        """
+        ca.check_mismatch('Sample Type', kind, ['label', 'text'])
+        if aspect is not None:
+            ca.check_mismatch('Dataset Aspect', aspect, ['sentiment', 'intent', 'topic'])
+        d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, aspect=aspect, **kwargs)
+        # in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
+        dnms = list(d_vect.keys())
+        # dnms = in_dnms + out_dnms
         vect = np.concatenate([d_vect[dnm] for dnm in dnms])
         # TODO or `random` init?
         mapped = TSNE(
-            n_components=2, perplexity=50, learning_rate='auto', init='pca', random_state=sconfig('random-seed')
+            n_components=2, perplexity=50,
+            # learning_rate='auto',  # TODO: causes numpy error???
+            init='pca', random_state=sconfig('random-seed')
         ).fit_transform(vect)
 
         k_dnm = 'dataset_name'
@@ -367,33 +382,27 @@ class VisualizeOverlap:
         aspect2domain2dset = defaultdict(lambda: defaultdict(list))
         for dnm, d_dset in sconfig('UTCD.datasets').items():
             aspect2domain2dset[d_dset['aspect']][d_dset['domain']].append(dnm)
-        n_gap = 6
-        n_aspect, n_dset_per_aspect = sconfig('UTCD.num_aspect'), sconfig('UTCD.num_dataset_per_aspect')
-        cs = sns.color_palette('husl', n_aspect * (n_dset_per_aspect+n_gap))
-        cs = cs[:n_dset_per_aspect] + cs[n_dset_per_aspect+n_gap:n_dset_per_aspect*2+n_gap] + \
-            cs[n_dset_per_aspect*2+n_gap*2:-n_gap]
+        if not cs:
+            n_gap = 6
+            n_aspect, n_dset_per_aspect = sconfig('UTCD.num_aspect'), sconfig('UTCD.num_dataset_per_aspect')
+            if aspect is not None:
+                n_aspect = 1
+            cs = sns.color_palette('husl', n_colors=n_aspect * (n_dset_per_aspect+n_gap))
+            cs = cs[:n_dset_per_aspect] + cs[n_dset_per_aspect+n_gap:n_dset_per_aspect*2+n_gap] + \
+                cs[n_dset_per_aspect*2+n_gap*2:-n_gap]
         dnms = []  # update order for color-coding
-        dnm2c, it_c = dict(), iter(cs)
-        for i_as, aspect in enumerate(aspect2domain2dset.keys()):
-            for i_dm, (domain, dnms_) in enumerate(aspect2domain2dset[aspect].items()):
+        for i_as, aspect_ in enumerate(aspect2domain2dset.keys()):
+            if aspect is not None and aspect_ != aspect:
+                continue
+            for i_dm, (domain, dnms_) in enumerate(aspect2domain2dset[aspect_].items()):
                 for i_dset, dnm in enumerate(dnms_):
                     dnms.append(dnm)
-                    # idx = i_as * n_dset_per_aspect + i_dm * sconfig('UTCD.num_dataset_per_domain_per_aspect') + i_dset
-                    # dnm2c[dnm] = next(it_c)
-                    # dnm2c[dnm] = cs[idx]
-                    # ic(aspect, domain, dnm, idx)
         df_col2cat_col(df, k_dnm, categories=dnms)  # enforce legend order
-        # dnm2count = df[k_dnm].value_counts().to_dict()
-        # ic(dnm2count)
-        ic(dnms, cs, len(dnms), len(cs))
         dnm2count = {k: len(v) for k, v in d_vect.items()}
-        # ic(dnm2count)
         n_sample = sum(dnm2count.values())
-        # ic(n_sample)
         fig_w, fig_h = 10, 12
-        ms = fig_w * fig_h * 128/n_sample
+        ms = min(fig_w * fig_h * 128/n_sample, 192)
         dnm2ms = {dnm: 1/math.log(c) * ms for dnm, c in dnm2count.items()}
-        # ic(dnm2ms)
 
         fig = plt.figure(figsize=(fig_w, fig_h), constrained_layout=False)
         ax = sns.scatterplot(data=df, x='x', y='y', hue=k_dnm, palette=cs, size=k_dnm, sizes=dnm2ms, alpha=0.5)
@@ -411,7 +420,8 @@ class VisualizeOverlap:
             cov = np.cov(xs_, ys_)
             pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
             r_x, r_y = np.sqrt(1 + pearson), np.sqrt(1 - pearson)
-            ellipse = Ellipse((0, 0), width=r_x*2, height=r_y*2, **(dict(fc='none') | kws))
+            args = {**dict(fc='none'), **kws}
+            ellipse = Ellipse((0, 0), width=r_x*2, height=r_y*2, **args)
             scl_x, scl_y = np.sqrt(cov[0, 0]) * n_std, np.sqrt(cov[1, 1]) * n_std
             mu_x, mu_y = np.mean(xs_), np.mean(ys_)
             tsf = transforms.Affine2D().rotate_deg(45).scale(scl_x, scl_y).translate(mu_x, mu_y)
@@ -419,16 +429,12 @@ class VisualizeOverlap:
             return ax.add_patch(ellipse)
         txt_locs, dnm2pa = [], dict()
         for dnm, c in zip(dnms, cs):
-        # for dnm in dnms:
-        #     c = dnm2c[dnm]
             xs, ys = df[df[k_dnm] == dnm]['x'].values, df[df[k_dnm] == dnm]['y'].values
             dnm2pa[dnm] = confidence_ellipse(xs, ys, n_std=1, fc=to_rgba(c, 0.1), ec=to_rgba(c, 0.6))
 
         inv_tsf = ax.transData.inverted()
         txts = []
         for dnm, c in zip(dnms, cs):
-        # for dnm in dnms:
-        #     c = dnm2c[dnm]
             xs, ys = df[df[k_dnm] == dnm]['x'].values, df[df[k_dnm] == dnm]['y'].values
             pa = dnm2pa[dnm]
 
@@ -480,26 +486,19 @@ class VisualizeOverlap:
         ax.set_aspect('equal')
         ax.set_xlabel(None)
         ax.set_ylabel(None)
-        title = f'UTCD dataset Embedded {kind.capitalize()} scatter plot'
+        title = f'UTCD dataset Embedded {kind.capitalize()} t-SNE scatter plot'
+        if aspect:
+            title = f'{title} on {aspect.capitalize()}'
         plt.suptitle(title)
 
-        handles, labels = ax.get_legend_handles_labels()
-        ic(handles, labels, len(handles), len(labels))
-        # ax.legend(labels=[map_label(dnm) for dnm in labels], bbox_to_anchor=(1.02, 0.98))
         l = ax.get_legend()  # need to have the seaborn legend added first
         l.remove()
-        # l.set_title()
         l = fig.legend(title=k_dnm.replace('_', ' '), loc='lower center', bbox_transform=fig.transFigure, ncol=3)
         for t in l.get_texts():
             t.set_text(map_label(t.get_text()))
-
         legend_v_ratio = 0.15
-        # handles, labels = ax.get_legend_handles_labels()
-        # ax.legend(labels=[map_label(dnm) for dnm in labels], loc='lower center', bbox_transform=fig.transFigure)
         plt.subplots_adjust(bottom=legend_v_ratio)
         plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
-        # for lh in hdls:
-        #     lh._sizes = [50]
         if save:
             save_fig(title)
         else:
@@ -618,5 +617,23 @@ if __name__ == '__main__':
     def plot_encoded_overlap():
         kd = 'label'
         # ic(vs.get_utcd_embeddings(kind=kd))
-        vs.plot_utcd_embeddings(kind=kd)
-    plot_encoded_overlap()
+        sv = False
+        # sv = True
+        cs = None
+        # cs = sns.color_palette('husl', n_colors=18)
+        # cs = sns.color_palette('hls', n_colors=18)
+        # cs = sns.color_palette(n_colors=18)
+        vs.plot_utcd_embeddings(kind=kd, cs=cs, save=sv)
+    # plot_encoded_overlap()
+
+    def plot_encoded_overlap_aspect():
+        kd = 'label'
+        # sv = False
+        sv = True
+        # aspect = None
+        # aspect = 'topic'
+        # aspect = 'intent'
+        # aspect = 'sentiment'
+        for aspect in sconfig('UTCD.aspects'):
+            vs.plot_utcd_embeddings(kind=kd, aspect=aspect, save=sv)
+    plot_encoded_overlap_aspect()

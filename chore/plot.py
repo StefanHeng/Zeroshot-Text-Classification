@@ -82,7 +82,7 @@ def plot_setups_acc(
         train_strategy: str = 'vanilla', train_description: str = '3ep',
         save=False,
         color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
-        title: str = None,
+        title: str = None, ylim: Tuple[int, int] = None,
 ):
     ca(dataset_domain=domain)
 
@@ -118,17 +118,21 @@ def plot_setups_acc(
         dnm_ints = list(range(len(dnms)))
         ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
         ax.set_title(f'{aspect} split')
-    scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
-    edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
-    ma, mi = np.max(scores), np.min(scores)
-    ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
-    for ax, edges_ in zip(axes, edges):
-        ax.set_ylim([mi, ma])
-        ma_, mi_ = float(np.max(edges_)), float(np.min(edges_))
-        assert ma_.is_integer() and mi_.is_integer()
-        ax.set_xlim([mi_-0.25, ma_+0.25])
-    for ax in axes[1:]:
-        ax.set_yticklabels([])
+    else:
+        scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
+        edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
+        ma, mi = np.max(scores), np.min(scores)
+        ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
+        for ax, edges_ in zip(axes, edges):
+            if ylim:
+                ax.set_ylim(ylim)
+            else:
+                ax.set_ylim([mi, ma])
+            ma_, mi_ = float(np.max(edges_)), float(np.min(edges_))
+            assert ma_.is_integer() and mi_.is_integer()
+            ax.set_xlim([mi_-0.25, ma_+0.25])
+        for ax in axes[1:]:
+            ax.set_yticklabels([])
     title = title or f'Training Classification Accuracy - {domain_str} evaluation'
     plt.suptitle(title)
     fig.supylabel('Classification Accuracy (%)')
@@ -242,20 +246,21 @@ if __name__ == '__main__':
         else:
             _setups = [
                 ('binary-bert', 'rand', 'vanilla'),
-                ('binary-bert', 'rand', 'implicit'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
+                # ('binary-bert', 'rand', 'implicit'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
             ]
             setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
         # ic(setups)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling, new shuffle'
+        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling, May'
         plot_setups_acc(
             setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
-            title=title
+            title=title,
+            ylim=(0, 100)
         )
-    # plot_berts_implicit(domain='in')
-    # plot_berts_implicit(domain='out')
+    plot_berts_implicit(domain='in')
+    plot_berts_implicit(domain='out')
     # plot_berts_implicit(domain='in', with_5ep=True)
-    plot_berts_implicit(domain='out', with_5ep=True)
+    # plot_berts_implicit(domain='out', with_5ep=True)

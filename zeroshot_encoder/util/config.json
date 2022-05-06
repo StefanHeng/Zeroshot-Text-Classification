@@ -1724,6 +1724,8 @@
                 "gpt2-lb_avg_tokens": 6.611644906949277
             }
         },
+        "aspects": ["sentiment", "intent", "topic"],
+        "domains": ["in", "out"],
         "num_aspect": 3,
         "num_dataset_per_aspect": 6,
         "num_dataset_per_domain_per_aspect": 3,
