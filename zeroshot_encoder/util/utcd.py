@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import pickle
 from os.path import join as os_join
 from typing import List, Tuple, Dict, Iterable, Callable, Any, Union
 from zipfile import ZipFile
@@ -9,8 +10,10 @@ from collections import Counter, namedtuple, defaultdict
 
 import numpy as np
 import pandas as pd
+import torch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.manifold import TSNE
+from MulticoreTSNE import MulticoreTSNE as mcTSNE
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 from sentence_transformers import SentenceTransformer
 import spacy
@@ -330,12 +333,36 @@ class VisualizeOverlap:
             plt.show()
 
     @staticmethod
-    def get_utcd_embeddings(kind: str = 'label', aspect: str = None, batch_size: int = 16):
+    def get_utcd_embeddings(
+            kind: str = 'label', aspect: str = None, batch_size: int = 16, cache: str = None
+    ) -> Dict[str, np.ndarray]:
         """
         Plot sample embeddings in lower dimension
         and hopefully the overlap between each dataset cluster lines up with performance
         """
-        model = SentenceTransformer('all-mpnet-base-v2')  # per SBert package, the one with the highest quality
+        def _get():
+            return VisualizeOverlap._get_utcd_embeddings(kind=kind, aspect=aspect, batch_size=batch_size)
+        if cache:
+            fnm = f'{cache}.pkl'
+            path = os_join(u.plot_path, 'cache')
+            os.makedirs(path, exist_ok=True)
+            path = os_join(path, fnm)
+
+            if os.path.exists(path):
+                with open(path, 'rb') as f:
+                    return pickle.load(f)
+            else:
+                d = _get()
+                with open(path, 'wb') as f:
+                    pickle.dump(d, f)
+                return d
+        else:
+            return _get()
+
+    @staticmethod
+    def _get_utcd_embeddings(kind, aspect, batch_size):
+        # per SBert package, the one with the highest quality
+        model = SentenceTransformer('all-mpnet-base-v2', device='cuda' if torch.cuda.is_available() else 'cpu')
         in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
         ret = dict()
         dnms = in_dnms + out_dnms
@@ -353,27 +380,41 @@ class VisualizeOverlap:
         return ret
 
     @staticmethod
-    def plot_utcd_embeddings(kind: str = 'label', save=False, aspect: str = None, cs: List = None, **kwargs):
+    def plot_utcd_embeddings(
+            kind: str = 'label', save=False, aspect: str = None, cs: List = None, fast: bool = True,
+            **kwargs
+    ):
         """
         :param kind: Encode either text or label
         :param save: If true, plot is saved
         :param aspect: If given, plot only one aspect
         :param cs: A list of colors for each cluster
+        :param fast: If true, run t-SNE with a custom fast package
         """
         ca.check_mismatch('Sample Type', kind, ['label', 'text'])
         if aspect is not None:
             ca.check_mismatch('Dataset Aspect', aspect, ['sentiment', 'intent', 'topic'])
         d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, aspect=aspect, **kwargs)
         # in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
-        dnms = list(d_vect.keys())
+        dnms = VisualizeOverlap.in_dnms + VisualizeOverlap.out_dnms
+        if aspect is not None:
+            dnms = [dnm for dnm in dnms if sconfig(f'UTCD.datasets.{dnm}.aspect') == aspect]
         # dnms = in_dnms + out_dnms
         vect = np.concatenate([d_vect[dnm] for dnm in dnms])
         # TODO or `random` init?
-        mapped = TSNE(
+        args = dict(
             n_components=2, perplexity=50,
             # learning_rate='auto',  # TODO: causes numpy error???
+            learning_rate=1000,
             init='pca', random_state=sconfig('random-seed')
-        ).fit_transform(vect)
+        )
+        if fast:
+            cls = mcTSNE
+            args['init'] = 'random'  # PCA not supported
+        else:
+            cls = TSNE
+            args['init'] = 'pca'
+        mapped = cls(**args).fit_transform(vect)
 
         k_dnm = 'dataset_name'
         df = pd.DataFrame(chain_its([dnm] * len(d_vect[dnm]) for dnm in dnms), columns=[k_dnm])
@@ -420,8 +461,8 @@ class VisualizeOverlap:
             cov = np.cov(xs_, ys_)
             pearson = cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1])
             r_x, r_y = np.sqrt(1 + pearson), np.sqrt(1 - pearson)
-            args = {**dict(fc='none'), **kws}
-            ellipse = Ellipse((0, 0), width=r_x*2, height=r_y*2, **args)
+            _args = {**dict(fc='none'), **kws}
+            ellipse = Ellipse((0, 0), width=r_x*2, height=r_y*2, **_args)
             scl_x, scl_y = np.sqrt(cov[0, 0]) * n_std, np.sqrt(cov[1, 1]) * n_std
             mu_x, mu_y = np.mean(xs_), np.mean(ys_)
             tsf = transforms.Affine2D().rotate_deg(45).scale(scl_x, scl_y).translate(mu_x, mu_y)
@@ -486,7 +527,8 @@ class VisualizeOverlap:
         ax.set_aspect('equal')
         ax.set_xlabel(None)
         ax.set_ylabel(None)
-        title = f'UTCD dataset Embedded {kind.capitalize()} t-SNE scatter plot'
+        method = 't-SNE (fast)' if fast else 't-SNE'
+        title = f'UTCD dataset Embedded {kind.capitalize()} {method} scatter plot'
         if aspect:
             title = f'{title} on {aspect.capitalize()}'
         plt.suptitle(title)
@@ -615,25 +657,28 @@ if __name__ == '__main__':
     # plot_token_overlap()
 
     def plot_encoded_overlap():
+        # kd = 'text'
         kd = 'label'
         # ic(vs.get_utcd_embeddings(kind=kd))
-        sv = False
-        # sv = True
+        # sv = False
+        sv = True
         cs = None
+        cnm = f'{kd} embedding cache'
         # cs = sns.color_palette('husl', n_colors=18)
         # cs = sns.color_palette('hls', n_colors=18)
         # cs = sns.color_palette(n_colors=18)
-        vs.plot_utcd_embeddings(kind=kd, cs=cs, save=sv)
+        vs.plot_utcd_embeddings(kind=kd, cs=cs, save=sv, cache=cnm)
     # plot_encoded_overlap()
 
     def plot_encoded_overlap_aspect():
         kd = 'label'
         # sv = False
         sv = True
+        cnm = f'{kd} embedding cache'
         # aspect = None
         # aspect = 'topic'
         # aspect = 'intent'
         # aspect = 'sentiment'
         for aspect in sconfig('UTCD.aspects'):
-            vs.plot_utcd_embeddings(kind=kd, aspect=aspect, save=sv)
+            vs.plot_utcd_embeddings(kind=kd, aspect=aspect, save=sv, cache=cnm)
     plot_encoded_overlap_aspect()
