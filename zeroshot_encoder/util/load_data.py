@@ -19,6 +19,7 @@ import gdown
 from tqdm import tqdm
 
 from stefutil import *
+from zeroshot_encoder.util.util import sconfig
 from zeroshot_encoder.util import *
 
 in_domain_url = 'https://drive.google.com/uc?id=1V7IzdZ9HQbFUQz9NzBDjmqYBdPd9Yfe3'
@@ -321,21 +322,75 @@ def encoder_cls_format(
             examples.append(InputExample(texts=[element[1], element[0]], label=float(1)))
     return examples
 
-def seq_cls_format(data):
+def seq_cls_format(data, all=False):
     train = []
     test = []
+    label_map = {}
 
-    label_map = {k:i for i, k in enumerate(data['labels'])}
-
-    for k,v in data['train'].items():
-        # loop through each true label
-        for label in v:
-            train.append({'text': k, 'label': label_map[label], 'label_name': label})
+    if all:
+        for dataset, item in data.items():
+            for label in item['labels']:
+                if label not in label_map:
+                    label_map[label] = len(label_map)
+            
+            for k,v in item['train'].items():
+                # loop through each true label
+                for label in v:
+                    train.append({'text': k, 'label': label_map[label], 'label_name': label})
     
-    for k,v in data['test'].items():
-        # loop through each true label
-        for label in v:
-            test.append({'text': k, 'label': label_map[label], 'label_name': label})
+            for k,v in item['test'].items():
+                # loop through each true label
+                for label in v:
+                    test.append({'text': k, 'label': label_map[label], 'label_name': label})
+            
+    else:
+
+        label_map = {k:i for i, k in enumerate(data['labels'])}
+
+        for k,v in data['train'].items():
+            # loop through each true label
+            for label in v:
+                train.append({'text': k, 'label': label_map[label], 'label_name': label})
+        
+        for k,v in data['test'].items():
+            # loop through each true label
+            for label in v:
+                test.append({'text': k, 'label': label_map[label], 'label_name': label})
 
 
     return train, test, label_map
+
+class ExplicitInputExample:
+    def __init__(self, texts, label, aspect) -> None:
+        self.texts = texts
+        self.label = label
+        self.aspect = aspect
+    
+    def __str__(self):
+        return "<ExplicitInputExample> label: {}, text: {}".format(str(self.label), self.text)
+
+def binary_explicit_format(dataset):
+    aspect_map = {"sentiment": 0, "intent": 1, "topic": 2}
+
+    train = []
+
+    for name, data in dataset.items():
+        aspect = data['aspect']
+        label_list = data['labels']
+
+        for i, (text, labels) in enumerate(tqdm(data['train'].items())):
+                
+            true_labels = labels
+            other_labels = [label for label in label_list if label not in true_labels]
+            
+            # Generate label for true example
+            for label in true_labels:
+                train.append(ExplicitInputExample(texts=[label, text], label=1, aspect=aspect_map[aspect]))
+                random.seed(i)
+                if len(other_labels) >= 2:
+                    random_label = random.sample(other_labels, k=2)
+                    train.append(ExplicitInputExample(texts=[random_label[0], text], label=float(0), aspect=aspect_map[aspect]))
+                    train.append(ExplicitInputExample(texts=[random_label[1], text], label=float(0), aspect=aspect_map[aspect]))
+                elif len(other_labels) > 0:
+                    train.append(ExplicitInputExample(texts=[other_labels[0], text], label=float(0), aspect=aspect_map[aspect]))
+    return train

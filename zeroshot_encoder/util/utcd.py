@@ -14,6 +14,7 @@ import torch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.manifold import TSNE
 from MulticoreTSNE import MulticoreTSNE as mcTSNE
+from tsnecuda import TSNE as cuTSNE
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 from sentence_transformers import SentenceTransformer
 import spacy
@@ -344,7 +345,7 @@ class VisualizeOverlap:
             return VisualizeOverlap._get_utcd_embeddings(kind=kind, aspect=aspect, batch_size=batch_size)
         if cache:
             fnm = f'{cache}.pkl'
-            path = os_join(u.plot_path, 'cache')
+            path = os_join(BASE_PATH, PROJ_DIR, 'cache')
             os.makedirs(path, exist_ok=True)
             path = os_join(path, fnm)
 
@@ -381,7 +382,8 @@ class VisualizeOverlap:
 
     @staticmethod
     def plot_utcd_embeddings(
-            kind: str = 'label', save=False, aspect: str = None, cs: List = None, fast: bool = True,
+            kind: str = 'label', save=False, aspect: str = None, cs: List = None, mode: str = 'sklearn',
+            n_sample: int = None,
             **kwargs
     ):
         """
@@ -389,33 +391,49 @@ class VisualizeOverlap:
         :param save: If true, plot is saved
         :param aspect: If given, plot only one aspect
         :param cs: A list of colors for each cluster
-        :param fast: If true, run t-SNE with a custom fast package
+        :param mode: t-SNE mode, one of ['sklearn', 'multi-core', 'cuda']
+        :param n_sample: If given, plot a subset of each dataset randomly
+        :param n_sample: If given, plot a subset of each dataset randomly
         """
         ca.check_mismatch('Sample Type', kind, ['label', 'text'])
+        ca.check_mismatch('t-SNE Mode', mode, ['sklearn', 'multi-core', 'cuda'])
         if aspect is not None:
             ca.check_mismatch('Dataset Aspect', aspect, ['sentiment', 'intent', 'topic'])
+        logger = get_logger('UTCD Embedding Plot')
+        d_log = dict(kind=kind, aspect=aspect, mode=mode)
+        logger.info(f'Plotting embeddings on {log_dict(d_log)}... ')
         d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, aspect=aspect, **kwargs)
-        # in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
+        if n_sample:
+            def _get_sample(dnm):
+                idxs = np.random.permutation(len(d_vect[dnm]))[:n_sample]
+                return d_vect[dnm][idxs]
+            d_vect = {dnm: _get_sample(dnm) for dnm in d_vect}
         dnms = VisualizeOverlap.in_dnms + VisualizeOverlap.out_dnms
         if aspect is not None:
             dnms = [dnm for dnm in dnms if sconfig(f'UTCD.datasets.{dnm}.aspect') == aspect]
-        # dnms = in_dnms + out_dnms
         vect = np.concatenate([d_vect[dnm] for dnm in dnms])
         # TODO or `random` init?
         args = dict(
             n_components=2, perplexity=50,
             # learning_rate='auto',  # TODO: causes numpy error???
             learning_rate=1000,
-            init='pca', random_state=sconfig('random-seed')
+            random_state=sconfig('random-seed')
         )
-        if fast:
+        if mode == 'sklearn':
+            cls = TSNE
+            args['init'] = 'pca'
+        elif mode == 'multi-core':
             cls = mcTSNE
             args['init'] = 'random'  # PCA not supported
         else:
-            cls = TSNE
-            args['init'] = 'pca'
+            cls = cuTSNE
+            args['init'] = 'random'
+            del args['random_state']
+
+        logger.info(f'Running t-SNE on {logi(len(vect))} vectors with args {log_dict(args)}... ')
         mapped = cls(**args).fit_transform(vect)
 
+        logger.info('Plotting... ')
         k_dnm = 'dataset_name'
         df = pd.DataFrame(chain_its([dnm] * len(d_vect[dnm]) for dnm in dnms), columns=[k_dnm])
         df['x'] = mapped[:, 0]
@@ -440,13 +458,13 @@ class VisualizeOverlap:
                     dnms.append(dnm)
         df_col2cat_col(df, k_dnm, categories=dnms)  # enforce legend order
         dnm2count = {k: len(v) for k, v in d_vect.items()}
-        n_sample = sum(dnm2count.values())
+        n_sample = sum(dnm2count.values())  # now, all datasets combined
         fig_w, fig_h = 10, 12
-        ms = min(fig_w * fig_h * 128/n_sample, 192)
+        ms = max(min(fig_w * fig_h * 128/n_sample, 192), 16)
         dnm2ms = {dnm: 1/math.log(c) * ms for dnm, c in dnm2count.items()}
 
         fig = plt.figure(figsize=(fig_w, fig_h), constrained_layout=False)
-        ax = sns.scatterplot(data=df, x='x', y='y', hue=k_dnm, palette=cs, size=k_dnm, sizes=dnm2ms, alpha=0.5)
+        ax = sns.scatterplot(data=df, x='x', y='y', hue=k_dnm, palette=cs, size=k_dnm, sizes=dnm2ms, alpha=0.3)
 
         def confidence_ellipse(xs_, ys_, n_std=1., **kws):
             """
@@ -527,8 +545,7 @@ class VisualizeOverlap:
         ax.set_aspect('equal')
         ax.set_xlabel(None)
         ax.set_ylabel(None)
-        method = 't-SNE (fast)' if fast else 't-SNE'
-        title = f'UTCD dataset Embedded {kind.capitalize()} {method} scatter plot'
+        title = f'UTCD dataset Embedded {kind.capitalize()} t-SNE scatter plot'
         if aspect:
             title = f'{title} on {aspect.capitalize()}'
         plt.suptitle(title)
@@ -542,6 +559,9 @@ class VisualizeOverlap:
         plt.subplots_adjust(bottom=legend_v_ratio)
         plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
         if save:
+            title = f'{title}, md={mode}'
+            if n_sample:
+                title = f'{title}, n={n_sample}'
             save_fig(title)
         else:
             plt.show()
@@ -657,18 +677,22 @@ if __name__ == '__main__':
     # plot_token_overlap()
 
     def plot_encoded_overlap():
-        # kd = 'text'
-        kd = 'label'
+        kd = 'text'
+        # kd = 'label'
         # ic(vs.get_utcd_embeddings(kind=kd))
         # sv = False
         sv = True
-        cs = None
         cnm = f'{kd} embedding cache'
+        # cs = None
         # cs = sns.color_palette('husl', n_colors=18)
         # cs = sns.color_palette('hls', n_colors=18)
-        # cs = sns.color_palette(n_colors=18)
-        vs.plot_utcd_embeddings(kind=kd, cs=cs, save=sv, cache=cnm)
-    # plot_encoded_overlap()
+        cs = sns.color_palette(n_colors=18)
+        md = 'cuda'
+        # TODO: running on all data & some # subset of data gives CUDA error???
+        # n = None
+        n = 3072 * 32
+        vs.plot_utcd_embeddings(kind=kd, cs=cs, save=sv, cache=cnm, batch_size=1024, mode=md, n_sample=n)
+    plot_encoded_overlap()
 
     def plot_encoded_overlap_aspect():
         kd = 'label'
@@ -681,4 +705,4 @@ if __name__ == '__main__':
         # aspect = 'sentiment'
         for aspect in sconfig('UTCD.aspects'):
             vs.plot_utcd_embeddings(kind=kd, aspect=aspect, save=sv, cache=cnm)
-    plot_encoded_overlap_aspect()
+    # plot_encoded_overlap_aspect()

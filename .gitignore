@@ -45,6 +45,7 @@ share/python-wheels/
 table/
 MANIFEST
 plot/
+cache/
 requirements, *.txt
 
 # PyInstaller
