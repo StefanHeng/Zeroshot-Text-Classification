@@ -1,12 +1,15 @@
 import math
+import pickle
 import random
 import logging
-from typing import List
-from pathlib import Path
+import datetime
+from typing import List, Dict
 from os.path import join
 from argparse import ArgumentParser
 
 import pandas as pd
+import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import classification_report
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -14,11 +17,8 @@ from sentence_transformers.cross_encoder.evaluation import CESoftmaxAccuracyEval
 from tqdm import tqdm
 
 from stefutil import *
-from zeroshot_encoder.util.util import sconfig
 from zeroshot_encoder.util import *
 from zeroshot_encoder.util.load_data import get_data, binary_cls_format, in_domain_data_path, out_of_domain_data_path
-
-random.seed(42)  # for negative sampling
 
 
 def parse_args():
@@ -27,7 +27,7 @@ def parse_args():
         'implicit',
         'implicit-on-text-encode-aspect',  # encode each of the 3 aspects as 3 special tokens, followed by text
         'implicit-on-text-encode-sep',  # encode aspects normally, but add special token between aspect and text
-        'explicit'
+        # see `zeroshot_encoder.explicit.binary_bert.py` for explicit training
     ]
 
     parser = ArgumentParser()
@@ -43,9 +43,11 @@ def parse_args():
     parser_train.add_argument('--epochs', type=int, default=3)
 
     # set test arguments
-    parser_test.add_argument('--model_path', type=str, required=True)
     parser_test.add_argument('--domain', type=str, choices=['in', 'out'], required=True)
     parser_test.add_argument('--mode', type=str, choices=modes, default='vanilla')
+    parser_test.add_argument('--batch_size', type=int, default=32)  # #of texts to do inference in a single forward pass
+    # parser_test.add_argument('--group_size', type=int, default=16)
+    parser_test.add_argument('--model_path', type=str, required=True)
     
     return parser.parse_args()
 
@@ -53,17 +55,24 @@ def parse_args():
 logger = logging.getLogger(__name__)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    import os
+
+    import numpy as np
+    import transformers
+
     from icecream import ic
+
+    transformers.set_seed(42)
 
     args = parse_args()
     if args.command == 'train':
         data = get_data(in_domain_data_path)
         # get keys from data dict
-        datasets = list(data.keys())
+        dataset_names = list(data.keys())
         train = []
         test = []
-        for dataset in datasets:
+        for dataset in dataset_names:
             train += binary_cls_format(data[dataset], name=dataset, sampling=args.sampling, mode=args.mode)
             test += binary_cls_format(data[dataset], train=False, mode=args.mode)
 
@@ -83,7 +92,7 @@ if __name__ == "__main__":
         model.tokenizer.add_special_tokens(spec_tok_args)
         model.model.resize_token_embeddings(len(model.tokenizer))
 
-        new_shuffle = False
+        new_shuffle = True
         if new_shuffle:
             train_dataloader = DataLoader(train, shuffle=True, batch_size=train_batch_size)
         else:
@@ -106,32 +115,43 @@ if __name__ == "__main__":
             output_path=model_save_path
         )
     if args.command == 'test':
-        mode = args.mode
-        pred_path = join(args.model_path, 'preds/{}/'.format(args.domain))
-        result_path = join(args.model_path, 'results/{}/'.format(args.domain))
-        Path(pred_path).mkdir(parents=True, exist_ok=True)
-        Path(result_path).mkdir(parents=True, exist_ok=True)
-        if args.domain == 'in':
-            data = get_data(in_domain_data_path)
-        else:  # out
-            data = get_data(out_of_domain_data_path)
-        # get keys from data dict
-        datasets = list(data.keys())
+        mode, domain, model_path, bsz = args.mode, args.domain, args.model_path, args.batch_size
+        domain_str = 'in-domain' if domain == 'in' else 'out-domain'
+        date = datetime.datetime.now().strftime('%m.%d.%Y')
+        date = date[:-4] + date[-2:]  # 2-digit year
+        # ic(date)
+        out_path = join(model_path, 'eval', f'{domain_str}, {date}')
+        os.makedirs(out_path, exist_ok=True)
 
-        # load model
-        model = CrossEncoder(args.model_path)
+        data = get_data(in_domain_data_path if domain == 'in' else out_of_domain_data_path)
+        model = CrossEncoder(model_path)  # load model
+        sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
+        aspect2aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')
 
-        label_map = ["false", "true"]
+        logger = get_logger('Binary Bert Eval')
+        d_log = dict(mode=mode, domain=domain, batch_size=bsz, path=model_path)
+        logger.info(f'Evaluating Binary Bert with {log_dict(d_log)} and saving to {logi(out_path)}... ')
 
-        # loop through all datasets
-        for dataset in datasets:
-            examples = data[dataset]["test"]
-            labels = data[dataset]['labels']
-            aspect = data[dataset]['aspect']
-            preds = []
-            gold = []
-            correct = 0
+        eval_loss: Dict[str, np.array] = dict()  # a sense of how badly the model makes the prediction
+        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
 
+        for dnm in dataset_names:  # loop through all datasets
+            dset = data[dnm]
+            # if 'yahoo' not in dnm:
+            #     continue
+            split = 'test'
+            txts, aspect = dset[split], dset['aspect']
+            d_dset = sconfig(f'UTCD.datasets.{dnm}.splits.{split}')
+            label_options, multi_label = d_dset['labels'], d_dset['multi_label']
+            n_options = len(label_options)
+            label2id = {lbl: i for i, lbl in enumerate(label_options)}
+            n_txt = sconfig(f'UTCD.datasets.{dnm}.splits.{split}.n_text')
+            d_log = {'#text': n_txt, '#label': n_options}
+            logger.info(f'Evaluating {logi(dnm)} with {log_dict(d_log)}...')
+            arr_preds, arr_labels = np.empty(n_txt, dtype=int), np.empty(n_txt, dtype=int)
+            arr_loss = torch.empty(n_txt, dtype=torch.float32)
+
+            txt_n_lbs2query = None
             if mode == 'vanilla':
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[txt, lb] for lb in lbs]
@@ -139,35 +159,49 @@ if __name__ == "__main__":
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[txt, f'{lb} {aspect}'] for lb in lbs]
             elif mode == 'implicit-on-text-encode-aspect':
-                aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')[aspect]
-
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
-                    return [[f'{aspect_token} {txt}', lb] for lb in lbs]
+                    return [[f'{aspect2aspect_token[aspect]} {txt}', lb] for lb in lbs]
             elif mode == 'implicit-on-text-encode-sep':
-                sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
-
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[f'{aspect} {sep_token} {txt}', lb] for lb in lbs]
-            else:
-                raise NotImplementedError(f'{logi(mode)} not supported yet')
 
+            gen = group_n(txts.items(), n=bsz)
             # loop through each test example
-            print(f'Evaluating dataset: {logi(dataset)}')
-            for index, (text, gold_labels) in enumerate(tqdm(examples.items())):
-                query = txt_n_lbs2query(text, labels)
-                results = model.predict(query, apply_softmax=True)
-
-                # compute which pred is higher
-                pred = labels[results[:, 1].argmax()]
-                preds.append(pred)
-               
-                if pred in gold_labels:
-                    correct += 1
-                    gold.append(pred)
+            for i_grp, group in enumerate(tqdm(gen, desc=dnm, unit='group', total=math.ceil(n_txt/bsz))):
+                txts_, lst_labels = zip(*group)
+                lst_labels: List[List[int]] = [[label2id[lb] for lb in labels] for labels in lst_labels]
+                query = sum([txt_n_lbs2query(t, label_options) for t in txts_], start=[])  # (n_options x bsz, 2)
+                # probability for positive class
+                logits = model.predict(query, batch_size=bsz, apply_softmax=True, convert_to_tensor=True)[:, 1]
+                logits = logits.reshape(-1, n_options)
+                preds = logits.argmax(axis=1)
+                trues = torch.empty_like(preds)
+                for i, pred, labels in zip(range(bsz), preds, lst_labels):
+                    # if false prediction, pick one of the correct labels arbitrarily
+                    trues[i] = pred if pred in labels else labels[0]
+                idx_strt = i_grp*bsz
+                arr_preds[idx_strt:idx_strt+bsz], arr_labels[idx_strt:idx_strt+bsz] = preds.cpu(), trues.cpu()
+                if multi_label and any(len(lbs) > 1 for lbs in lst_labels):
+                    # in this case, vectorizing is complicated, run on each sample separately since edge case anyway
+                    for i, lbs in enumerate(lst_labels):
+                        target = torch.tensor(lbs, device=logits.device)
+                        if len(lbs) > 1:
+                            # ic(logits[i].repeat(1, len(lbs)).shape, target)
+                            loss = max(F.cross_entropy(logits[i].repeat(len(lbs), 1), target, reduction='none'))
+                        else:
+                            # ic(logits[None, i].shape)
+                            loss = F.cross_entropy(logits[None, i], target)  # dummy batch dimension
+                        arr_loss[idx_strt+i] = loss
                 else:
-                    gold.append(gold_labels[0])
-            
-            print(f'{logi(dataset)} Dataset Accuracy: {logi(correct/len(examples))}')
-            report = classification_report(gold, preds, output_dict=True)
+                    arr_loss[idx_strt:idx_strt+bsz] = F.cross_entropy(logits, trues, reduction='none')
+            eval_loss[dnm] = arr_loss.numpy()
+
+            args = dict(zero_division=0, target_names=label_options, output_dict=True)  # disables warning
+            report = classification_report(arr_labels, arr_preds, **args)
+            acc = f'{report["accuracy"]:.3f}'
+            logger.info(f'{logi(dnm)} Classification Accuracy: {logi(acc)}')
             df = pd.DataFrame(report).transpose()
-            df.to_csv('{}/{}.csv'.format(result_path, dataset))
+            df.to_csv(join(out_path, f'{dnm}.csv'))
+            # exit(1)
+        with open(join(out_path, 'eval_loss.pkl'), 'wb') as f:
+            pickle.dump(eval_loss, f)
