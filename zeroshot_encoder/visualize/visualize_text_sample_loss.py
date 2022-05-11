@@ -52,7 +52,7 @@ class AttentionVisualizer:
 
         self.logger = get_logger('Binary BERT Attention Visualizer')
 
-    def visualize(self, dataset_name: str, text: str, label: str = None):
+    def visualize(self, dataset_name: str, text: str, label: str = None, aggregate_attention: bool = True, **kwargs):
         """
         Visualize the attention weights of a text, label pair
             Intended for binary bert
@@ -73,7 +73,35 @@ class AttentionVisualizer:
         else:
             args = self.model_cache[dataset_name][text][label]
         self.logger.info(f'Visualizing on {log_dict(text=text, label=label)} ... ')
-        head_view(**args)
+
+        if aggregate_attention:
+            attn = args['attention']
+            # ic(len(attn))
+            # for t in attn:
+            #     ic(t.shape)
+            # snap batch dimension, stack by layer
+            attn = torch.stack([a.squeeze() for a in attn], dim=0)  # #layer x #head x #seq_len x #seq_len
+            # ic(attn.shape)
+            attn = attn.mean(dim=1)  # average over all heads; L x T x T
+            # ic(attn.shape)
+            attn += torch.eye(attn.size(1))  # reverse residual connections; TODO: why diagonals??
+            attn /= attn.sum(dim=-1, keepdim=True)  # normalize all keys for each query
+
+            attn_res = torch.empty_like(attn)  # get recursive contribution of each token for all layers
+            attn_res[0] = attn[0]
+            for i in range(1, attn.size(0)):  # start from the bottom, multiply out the attentions on higher layers
+                attn_res[i] = attn[i] @ attn[i - 1]
+            # ic(attn_res.shape)
+            # attn_res = attn_res[:, 0, :]  # attention scores from each `cls` query to every token in all layers
+            attn_res[:, 0, 0] = 0  # ignore the score from cls to cls
+            # attn_res[:, :, 1:] = 0  # keep only scores queried from cls
+            # attn_res /= attn_res.max()  # normalize all scores, ready for visualization
+            # assert torch.all((0 <= attn_res) & (attn_res <= 1))  # sanity check
+            # ic(attn_res.shape)
+            # attn_res = attn_res.numpy()
+            # exit(1)
+            args['attention'] = [a.unsqueeze(0).unsqueeze(0) for a in attn_res]
+        head_view(**args, **kwargs)
 
     def _get_pair(self, dataset_name: str, text: str, label: Union[str, List[str]]):
         batched = isinstance(label, list)
@@ -82,18 +110,11 @@ class AttentionVisualizer:
         else:  # single label
             text_in, label_in = [text], [label]
         tok_args = dict(padding=True, truncation='longest_first', return_tensors='pt')
-        # ic(text_in, label_in)
         inputs = self.tokenizer(text_in, label_in, **tok_args)
         input_ids, token_type_ids = inputs['input_ids'], inputs['token_type_ids']
         with torch.no_grad():
             outputs = self.model(**inputs, output_attentions=True)
-        # ic(type(outputs))
-        # ic(outputs.keys())
         attn = outputs.attentions
-        # ic(logits.shape, logits)
-        #         # ic(type(attention), len(attention))
-        #         # for t in attention:
-        #     ic(t.shape)
         if batched:
             for i, (lb, iids, tids) in enumerate(zip(label, input_ids, token_type_ids)):
                 toks = self.tokenizer.convert_ids_to_tokens(iids)
@@ -106,7 +127,6 @@ class AttentionVisualizer:
         else:
             b_strt = token_type_ids[0].tolist().index(1)
             toks = self.tokenizer.convert_ids_to_tokens(input_ids[0])  # remove batch dimension
-            # ic(toks)
             arg = dict(attention=attn, tokens=toks, sentence_b_start=b_strt)
             self.model_cache[dataset_name][text][label] = arg  # index into the 1-element list
             return arg
@@ -122,7 +142,9 @@ if __name__ == '__main__':
     mdl_path = os_join(u.proj_path, u.model_dir, model_dir_nm)
 
     def get_bad_eg():
-        path_eval = os_join(mdl_path, 'eval', 'in-domain, 05.09.22')
+        # dir_nm = 'in-domain, 05.09.22'
+        dir_nm = 'out-of-domain, 05.10.22'
+        path_eval = os_join(mdl_path, 'eval', dir_nm)
         with open(os_join(path_eval, 'eval_loss.pkl'), 'rb') as f:
             d = pickle.load(f)
         save_path = os_join(u.proj_path, 'eval', 'binary-bert', 'rand, vanilla', 'in-domain, 05.09.22')
@@ -134,7 +156,7 @@ if __name__ == '__main__':
         dnm = 'emotion'
         txt = 'i feel like the writer wants me to think so and proclaiming he no longer liked pulsars is a petty and ' \
               'hilarious bit of character '
-        # lbl = 'anger'
+        lbl = 'anger'
         lbl = None
         av.visualize(dataset_name=dnm, text=txt, label=lbl)
     # visualize()

@@ -116,10 +116,9 @@ if __name__ == '__main__':
         )
     if args.command == 'test':
         mode, domain, model_path, bsz = args.mode, args.domain, args.model_path, args.batch_size
-        domain_str = 'in-domain' if domain == 'in' else 'out-domain'
+        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         date = datetime.datetime.now().strftime('%m.%d.%Y')
         date = date[:-4] + date[-2:]  # 2-digit year
-        # ic(date)
         out_path = join(model_path, 'eval', f'{domain_str}, {date}')
         os.makedirs(out_path, exist_ok=True)
 
