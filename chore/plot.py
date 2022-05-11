@@ -140,13 +140,13 @@ def plot_setups_acc(
 
     legend_v_ratio = 0.15
     handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
-    label2handle = dict(zip(labels, handles))
-    label_n_handle = OrderedDict(sorted(label2handle.items(), key=lambda t: t[0]))
-    fig.legend(label_n_handle.values(), label_n_handle.keys(), loc='lower center', bbox_transform=fig.transFigure)
+    # move up a bit so that don't block xlabel
+    loc_args = dict(loc='lower center', bbox_to_anchor=(0.5, 0.05), bbox_transform=fig.transFigure)
+    fig.legend(handles=handles, labels=labels, **loc_args)
     plt.subplots_adjust(bottom=legend_v_ratio)
     plt.tight_layout(rect=[0, legend_v_ratio, 1, 1])
     if save:
-        plt.savefig(os_join(get_chore_base(), 'plot', f'{now(for_path=True)}, {title}.png'), dpi=300)
+        save_fig(title)
     else:
         plt.show()
 
@@ -246,19 +246,19 @@ if __name__ == '__main__':
         else:
             _setups = [
                 ('binary-bert', 'rand', 'vanilla'),
-                # ('binary-bert', 'rand', 'implicit'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep')
+                ('binary-bert', 'rand', 'implicit'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep'),
+                ('binary-bert', 'rand', 'explicit')
             ]
             setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
         # ic(setups)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling, May'
+        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
         plot_setups_acc(
             setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
-            title=title,
-            ylim=(0, 100)
+            ylim=(0, 100), title=title
         )
     plot_berts_implicit(domain='in')
     plot_berts_implicit(domain='out')

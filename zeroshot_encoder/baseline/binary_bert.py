@@ -136,8 +136,6 @@ if __name__ == '__main__':
 
         for dnm in dataset_names:  # loop through all datasets
             dset = data[dnm]
-            # if 'yahoo' not in dnm:
-            #     continue
             split = 'test'
             txts, aspect = dset[split], dset['aspect']
             d_dset = sconfig(f'UTCD.datasets.{dnm}.splits.{split}')
@@ -185,10 +183,8 @@ if __name__ == '__main__':
                     for i, lbs in enumerate(lst_labels):
                         target = torch.tensor(lbs, device=logits.device)
                         if len(lbs) > 1:
-                            # ic(logits[i].repeat(1, len(lbs)).shape, target)
                             loss = max(F.cross_entropy(logits[i].repeat(len(lbs), 1), target, reduction='none'))
                         else:
-                            # ic(logits[None, i].shape)
                             loss = F.cross_entropy(logits[None, i], target)  # dummy batch dimension
                         arr_loss[idx_strt+i] = loss
                 else:
@@ -201,6 +197,5 @@ if __name__ == '__main__':
             logger.info(f'{logi(dnm)} Classification Accuracy: {logi(acc)}')
             df = pd.DataFrame(report).transpose()
             df.to_csv(join(out_path, f'{dnm}.csv'))
-            # exit(1)
         with open(join(out_path, 'eval_loss.pkl'), 'wb') as f:
             pickle.dump(eval_loss, f)

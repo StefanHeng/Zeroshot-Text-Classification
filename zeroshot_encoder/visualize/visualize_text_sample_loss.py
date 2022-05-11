@@ -76,14 +76,9 @@ class AttentionVisualizer:
 
         if aggregate_attention:
             attn = args['attention']
-            # ic(len(attn))
-            # for t in attn:
-            #     ic(t.shape)
             # snap batch dimension, stack by layer
             attn = torch.stack([a.squeeze() for a in attn], dim=0)  # #layer x #head x #seq_len x #seq_len
-            # ic(attn.shape)
             attn = attn.mean(dim=1)  # average over all heads; L x T x T
-            # ic(attn.shape)
             attn += torch.eye(attn.size(1))  # reverse residual connections; TODO: why diagonals??
             attn /= attn.sum(dim=-1, keepdim=True)  # normalize all keys for each query
 
@@ -91,15 +86,8 @@ class AttentionVisualizer:
             attn_res[0] = attn[0]
             for i in range(1, attn.size(0)):  # start from the bottom, multiply out the attentions on higher layers
                 attn_res[i] = attn[i] @ attn[i - 1]
-            # ic(attn_res.shape)
-            # attn_res = attn_res[:, 0, :]  # attention scores from each `cls` query to every token in all layers
             attn_res[:, 0, 0] = 0  # ignore the score from cls to cls
             # attn_res[:, :, 1:] = 0  # keep only scores queried from cls
-            # attn_res /= attn_res.max()  # normalize all scores, ready for visualization
-            # assert torch.all((0 <= attn_res) & (attn_res <= 1))  # sanity check
-            # ic(attn_res.shape)
-            # attn_res = attn_res.numpy()
-            # exit(1)
             args['attention'] = [a.unsqueeze(0).unsqueeze(0) for a in attn_res]
         head_view(**args, **kwargs)
 

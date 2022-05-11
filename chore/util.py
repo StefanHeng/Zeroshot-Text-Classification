@@ -81,6 +81,10 @@ class ChoreConfig:
                     ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22'],
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '5ep'):
                     ['binary-bert', 'rand, implicit-sep, 5ep', 'out-of-domain, 04.25.22'],
+                ('binary-bert', 'rand', 'explicit', 'in', '3ep'):
+                    ['binary-bert', 'rand, explicit', 'in-domain, 05.11.22'],
+                ('binary-bert', 'rand', 'explicit', 'out', '3ep'):
+                    ['binary-bert', 'rand, explicit', 'out-of-domain, 05.11.22'],
                 ('binary-bert', 'vect', 'vanilla', 'in', '3ep'):
                     ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22'],
 
@@ -130,6 +134,7 @@ class ChoreConfig:
                     'implicit': 'Implicit Labels',
                     'implicit-on-text-encode-aspect': 'Implicit Text with Aspect token',
                     'implicit-on-text-encode-sep': 'Implicit Text with Sep token',
+                    'explicit': 'Explicit Loss',
                 }
             }
         }
