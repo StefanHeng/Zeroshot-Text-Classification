@@ -82,9 +82,9 @@ class ChoreConfig:
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '5ep'):
                     ['binary-bert', 'rand, implicit-sep, 5ep', 'out-of-domain, 04.25.22'],
                 ('binary-bert', 'rand', 'explicit', 'in', '3ep'):
-                    ['binary-bert', 'rand, explicit', 'in-domain, 05.11.22'],
+                    ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22'],
                 ('binary-bert', 'rand', 'explicit', 'out', '3ep'):
-                    ['binary-bert', 'rand, explicit', 'out-of-domain, 05.11.22'],
+                    ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22'],
                 ('binary-bert', 'vect', 'vanilla', 'in', '3ep'):
                     ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22'],
 

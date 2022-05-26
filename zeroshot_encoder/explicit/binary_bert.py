@@ -1,8 +1,9 @@
 import os
 import math
+import logging
+import datetime
 from os.path import join
 from os.path import join as os_join
-from pathlib import Path
 from typing import List, Type, Dict, Optional, Union
 from argparse import ArgumentParser
 
@@ -18,7 +19,7 @@ from transformers import (
     BertConfig, BertModel, BertPreTrainedModel, BertTokenizer,
     get_scheduler
 )
-from transformers.utils import logging
+# from transformers.utils import logging
 from sklearn.metrics import classification_report
 from tqdm import tqdm, trange
 from torch.utils.tensorboard import SummaryWriter
@@ -30,9 +31,13 @@ from stefutil import *
 from zeroshot_encoder.util import *
 
 
-logging.set_verbosity_info()
-logger = logging.get_logger(__name__)
+# logging.set_verbosity_info()
+# logger = logging.get_logger(__name__)
+logger = logging.getLogger(__name__)
 set_seed(42)
+
+
+CLS_LOSS_ONLY = True  # TODO: debugging
 
 
 class BertZeroShotExplicit(BertPreTrainedModel):
@@ -45,10 +50,16 @@ class BertZeroShotExplicit(BertPreTrainedModel):
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.binary_cls = nn.Linear(self.config.hidden_size, 2)
-        self.aspect_cls = nn.Linear(self.config.hidden_size, 3)
+        self.aspect_cls = None if CLS_LOSS_ONLY else nn.Linear(self.config.hidden_size, 3)
 
         # Initialize weights and apply final processing
         self.post_init()
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        # calls `from_pretrained` from class `PreTrainedModel`
+        obj = super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        return obj
     
     def forward(
         self,
@@ -82,7 +93,12 @@ class BertZeroShotExplicit(BertPreTrainedModel):
 
         pooled_output = self.dropout(pooled_output)
         binary_logits = self.binary_cls(pooled_output)
-        aspect_logits = self.aspect_cls(pooled_output)
+        # if CLS_LOSS_ONLY:
+        #     with torch.no_grad():
+        #         aspect_logits = self.aspect_cls(pooled_output)
+        # else:
+        #     aspect_logits = self.aspect_cls(pooled_output)
+        aspect_logits = None if CLS_LOSS_ONLY else self.aspect_cls(pooled_output)
         
         loss = None
         
@@ -105,6 +121,12 @@ class ExplicitCrossEncoder:
 
         self.writer = None
         self.model_meta = dict(model='BinaryBERT', mode='explicit')
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        obj = cls()
+        obj.model = BertZeroShotExplicit.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        return obj
     
     def smart_batching_collate(self, batch):
         texts = [[] for _ in range(len(batch[0].texts))]
@@ -157,7 +179,7 @@ class ExplicitCrossEncoder:
         os.makedirs(output_path, exist_ok=True)
         mdl, md = self.model_meta['model'], self.model_meta['mode']
         log_fnm = f'{now(for_path=True)}, {mdl}, md={md}, #ep={epochs}'
-        self.writer = SummaryWriter(os_join(output_path, f'tb - {log_fnm}.log'))
+        self.writer = SummaryWriter(os_join(output_path, f'tb - {log_fnm}'))
 
         train_dataloader.collate_fn = self.smart_batching_collate
         self.model.to(self.device)
@@ -188,25 +210,35 @@ class ExplicitCrossEncoder:
             self.model.zero_grad()
             self.model.train()
 
-            # for features, labels, aspects in tqdm(train_dataloader, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
             with tqdm(train_dataloader, desc="Iteration", smoothing=0.05, disable=not show_progress_bar) as it:
-                for features, lbs, aspects in it:
+                for features, labels, aspects in it:
                     model_predictions = self.model(**features, return_dict=True)
 
                     pooled_output = model_predictions[1]
                     loss_fct = CrossEntropyLoss()
 
-                    task_loss_value = loss_fct(pooled_output['aspect'].view(-1, 3), aspects.view(-1))
-                    binary_loss_value = loss_fct(pooled_output['cls'].view(-1, 2), lbs.view(-1))
+                    # if CLS_LOSS_ONLY:
+                    #     with torch.no_grad():
+                    #         task_loss_value = loss_fct(pooled_output['aspect'].view(-1, 3), aspects.view(-1))
+                    # else:
+                    #     task_loss_value = loss_fct(pooled_output['aspect'].view(-1, 3), aspects.view(-1))
+                    task_loss_value = None
+                    if not CLS_LOSS_ONLY:
+                        task_loss_value = loss_fct(pooled_output['aspect'].view(-1, 3), aspects.view(-1))
+                    binary_loss_value = loss_fct(pooled_output['cls'].view(-1, 2), labels.view(-1))
 
-                    cls_loss, asp_loss = binary_loss_value.detach().item(), task_loss_value.detach().item()
+                    cls_loss = binary_loss_value.detach().item()
+                    asp_loss = None if CLS_LOSS_ONLY else task_loss_value.detach().item()
                     it.set_postfix(cls_loss=cls_loss, asp_loss=asp_loss)
-                    step = training_steps
+                    step = training_steps + epoch * len(train_dataloader)
                     self.writer.add_scalar('Train/learning rate', _get_lr(), step)
                     self.writer.add_scalar('Train/Binary Classification Loss', cls_loss, step)
-                    self.writer.add_scalar('Train/Aspect Classification Loss', asp_loss, step)
-
-                    loss = task_loss_value + binary_loss_value
+                    if not CLS_LOSS_ONLY:
+                        self.writer.add_scalar('Train/Aspect Classification Loss', asp_loss, step)
+                    if CLS_LOSS_ONLY:
+                        loss = binary_loss_value
+                    else:
+                        loss = task_loss_value + binary_loss_value
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
                     optimizer.step()
@@ -225,6 +257,7 @@ class ExplicitCrossEncoder:
         inp_dataloader = DataLoader(sentences, batch_size=batch_size, collate_fn=self.smart_batching_collate_text_only, shuffle=False)
 
         show_progress_bar = (logger.getEffectiveLevel() == logging.INFO or logger.getEffectiveLevel() == logging.DEBUG)
+        show_progress_bar = False
 
         iterator = inp_dataloader
         
@@ -244,7 +277,8 @@ class ExplicitCrossEncoder:
                     logits = torch.nn.functional.softmax(logits, dim=1)
                 pred_scores.extend(logits)
 
-        pred_scores = np.asarray([score.cpu().detach().numpy() for score in pred_scores])
+        # pred_scores = np.asarray([score.cpu().detach().numpy() for score in pred_scores])
+        pred_scores = torch.stack(pred_scores, dim=0).detach().cpu()
 
         return pred_scores
 
@@ -286,108 +320,128 @@ def parse_args():
                         help="The initial learning rate for Adam.")
 
     # set test arguments
-    parser_test.add_argument('--model_path', type=str, required=True)
     parser_test.add_argument('--domain', type=str, choices=['in', 'out'], required=True)
     parser_test.add_argument('--mode', type=str, choices=modes, default='vanilla')
+    parser_test.add_argument('--batch_size', type=int, default=32)
+    parser_test.add_argument('--model_path', type=str, required=True)
     
     return parser.parse_args()
 
 
 if __name__ == "__main__":
+    import transformers
     from icecream import ic
 
+    transformers.logging.set_verbosity_error()  # disables `longest_first` warning
+
     args = parse_args()
+    mode = args.mode
+    assert mode == 'explicit'
 
     if args.command == 'train':
+
+        bsz, lr, n_ep = args.batch_size, args.learning_rate, args.epochs
+        sampling = args.sampling
+        dirs = args.output.split(os.sep)
+        dir_nm_last = f'{now(for_path=True)}-{dirs[-1]}-{sampling}-{args.mode}'
+        save_path = os_join(*dirs[:-1], dir_nm_last)
+        _logger = get_logger('BinaryBERT Explicit Training')
+        d_log = dict(mode=mode, sampling=sampling, batch_size=bsz, epochs=n_ep, learning_rate=lr, save_path=save_path)
+        _logger.info(f'Running training on {log_dict(d_log)}.. ')
+
         dvc = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        n_sample = 1024  # TODO: debugging
+        _logger.info('Loading data & model... ')
+        # n_sample = 1024 * 8  # TODO: debugging
+        n_sample = None
         data = get_data(in_domain_data_path, n_sample=n_sample)
         # get keys from data dict
         datasets = list(data.keys())
         train = binary_explicit_format(data)
 
-        train_batch_size = args.batch_size
-        lr = args.learning_rate
-        num_epochs = args.epochs
-        model_save_path = join(args.output, args.sampling)
-
-        dl = DataLoader(train, shuffle=True, batch_size=train_batch_size)
+        dl = DataLoader(train, shuffle=True, batch_size=bsz)
 
         model = ExplicitCrossEncoder('bert-base-uncased', device=dvc)
 
-        warmup_steps_ = math.ceil(len(dl) * num_epochs * 0.1)  # 10% of train data for warm-up
-        logger.info("Warmup-steps: {}".format(warmup_steps_))
+        warmup_steps_ = math.ceil(len(dl) * n_ep * 0.1)  # 10% of train data for warm-up
+        _logger.info(f'Launched training on {logi(len(train))} samples and {logi(warmup_steps_)} warmup steps... ')
 
         model.fit(
             train_dataloader=dl,
-            epochs=num_epochs,
+            epochs=n_ep,
             warmup_steps=warmup_steps_,
             optimizer_params={'lr': lr},
-            output_path=model_save_path)
-    
+            output_path=save_path
+        )
     if args.command == 'test':
-        mode = args.mode
-        pred_path = join(args.model_path, 'preds/{}/'.format(args.domain))
-        result_path = join(args.model_path, 'results/{}/'.format(args.domain))
-        Path(pred_path).mkdir(parents=True, exist_ok=True)
-        Path(result_path).mkdir(parents=True, exist_ok=True)
-        if args.domain == 'in':
-            data = get_data(in_domain_data_path)
-        else:  # out
-            data = get_data(out_of_domain_data_path)
-        # get keys from data dict
-        datasets = list(data.keys())
+        mode, domain, model_path, bsz = args.mode, args.domain, args.model_path, args.batch_size
+        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+        date = datetime.datetime.now().strftime('%m.%d.%Y')
+        date = date[:-4] + date[-2:]  # 2-digit year
+        out_path = join(model_path, 'eval', f'{domain_str}, {date}')
+        os.makedirs(out_path, exist_ok=True)
 
-        model = ExplicitCrossEncoder(args.model_path)
+        data = get_data(in_domain_data_path if domain == 'in' else out_of_domain_data_path)
+        model = ExplicitCrossEncoder.from_pretrained(model_path)  # load model
+        sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
+        aspect2aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')
 
-        label_map = ["false", "true"]
+        logger = get_logger('Binary Bert Eval')
+        d_log = dict(mode=mode, domain=domain, batch_size=bsz, path=model_path)
+        logger.info(f'Evaluating Binary Bert with {log_dict(d_log)} and saving to {logi(out_path)}... ')
 
-        # loop through all datasets
-        for dataset in datasets:
-            examples = data[dataset]["test"]
-            label_options = data[dataset]['labels']
-            aspect = data[dataset]['aspect']
-            preds = []
-            gold = []
-            correct = 0
+        eval_loss: Dict[str, np.array] = dict()  # a sense of how badly the model makes the prediction
+        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
 
-            if mode == 'vanilla':
+        for dnm in dataset_names:  # loop through all datasets
+            # if 'consumer' not in dnm:
+            #     continue
+            dset = data[dnm]
+            split = 'test'
+            txts, aspect = dset[split], dset['aspect']
+            d_dset = sconfig(f'UTCD.datasets.{dnm}.splits.{split}')
+            label_options, multi_label = d_dset['labels'], d_dset['multi_label']
+            n_options = len(label_options)
+            label2id = {lbl: i for i, lbl in enumerate(label_options)}
+            n_txt = sconfig(f'UTCD.datasets.{dnm}.splits.{split}.n_text')
+            d_log = {'#text': n_txt, '#label': n_options}
+            logger.info(f'Evaluating {logi(dnm)} with {log_dict(d_log)}...')
+            arr_preds, arr_labels = np.empty(n_txt, dtype=int), np.empty(n_txt, dtype=int)
+
+            txt_n_lbs2query = None
+            if mode in ['vanilla', 'explicit']:
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[txt, lb] for lb in lbs]
             elif mode == 'implicit':
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[txt, f'{lb} {aspect}'] for lb in lbs]
             elif mode == 'implicit-on-text-encode-aspect':
-                aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')[aspect]
-
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
-                    return [[f'{aspect_token} {txt}', lb] for lb in lbs]
+                    return [[f'{aspect2aspect_token[aspect]} {txt}', lb] for lb in lbs]
             elif mode == 'implicit-on-text-encode-sep':
-                sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
-
                 def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
                     return [[f'{aspect} {sep_token} {txt}', lb] for lb in lbs]
-            else:
-                raise NotImplementedError(f'{logi(mode)} not supported yet')
 
+            gen = group_n(txts.items(), n=bsz)
             # loop through each test example
-            print(f'Evaluating dataset: {logi(dataset)}')
-            for index, (txt_, gold_labels) in enumerate(tqdm(examples.items())):
-                query = txt_n_lbs2query(txt_, label_options)
-                results = model.predict(query)
+            for i_grp, group in enumerate(tqdm(gen, desc=dnm, unit='group', total=math.ceil(n_txt/bsz))):
+                txts_, lst_labels = zip(*group)
+                lst_labels: List[List[int]] = [[label2id[lb] for lb in labels] for labels in lst_labels]
+                query = sum([txt_n_lbs2query(t, label_options) for t in txts_], start=[])  # (n_options x bsz, 2)
+                # probability for positive class
+                logits = model.predict(query, batch_size=bsz)[:, 1]
+                logits = logits.reshape(-1, n_options)
+                preds = logits.argmax(axis=1)
+                trues = torch.empty_like(preds)
+                for i, pred, labels in zip(range(bsz), preds, lst_labels):
+                    # if false prediction, pick one of the correct labels arbitrarily
+                    trues[i] = pred if pred in labels else labels[0]
+                idx_strt = i_grp*bsz
+                arr_preds[idx_strt:idx_strt+bsz], arr_labels[idx_strt:idx_strt+bsz] = preds.cpu(), trues.cpu()
 
-                # compute which pred is higher
-                pred = label_options[results[:, 1].argmax()]
-                preds.append(pred)
-               
-                if pred in gold_labels:
-                    correct += 1
-                    gold.append(pred)
-                else:
-                    gold.append(gold_labels[0])
-            
-            print(f'{logi(dataset)} Dataset Accuracy: {logi(correct/len(examples))}')
-            report = classification_report(gold, preds, output_dict=True)
+            args = dict(zero_division=0, target_names=label_options, output_dict=True)  # disables warning
+            report = classification_report(arr_labels, arr_preds, **args)
+            acc = f'{report["accuracy"]:.3f}'
+            logger.info(f'{logi(dnm)} Classification Accuracy: {logi(acc)}')
             df = pd.DataFrame(report).transpose()
-            df.to_csv('{}/{}.csv'.format(result_path, dataset))
+            df.to_csv(join(out_path, f'{dnm}.csv'))

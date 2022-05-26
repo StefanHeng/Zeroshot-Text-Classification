@@ -10,9 +10,7 @@ from sklearn.metrics import accuracy_score
 from argparse import ArgumentParser
 from zeroshot_encoder.util.load_data import get_data, seq_cls_format, in_domain_data_path, out_of_domain_data_path
 
-
 logger = logging.getLogger(__name__)
-
 
 def parse_args():
     parser = ArgumentParser()

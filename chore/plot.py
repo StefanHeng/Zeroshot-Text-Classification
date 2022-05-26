@@ -260,7 +260,7 @@ if __name__ == '__main__':
             setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
             ylim=(0, 100), title=title
         )
-    plot_berts_implicit(domain='in')
+    # plot_berts_implicit(domain='in')
     plot_berts_implicit(domain='out')
     # plot_berts_implicit(domain='in', with_5ep=True)
     # plot_berts_implicit(domain='out', with_5ep=True)
