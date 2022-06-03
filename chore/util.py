@@ -34,6 +34,29 @@ class ChoreConfig:
         # shuffle = 'ori'
         shuffle = 'new'
         sanity_check = True
+        explicit_v2 = True
+        intent_only = False
+        # intent_only = True
+        if explicit_v2:
+            rand_explicit_in = ['binary-bert', 'rand, explicit v2', 'in-domain, 05.25.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit v2', 'out-of-domain, 05.25.22']
+        else:
+            rand_explicit_in = ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22']
+        if intent_only:
+            rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
+            rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
+        else:
+            rand_vanilla_in = [
+                'binary-bert', 'rand, vanilla', 'in-domain, 05.03.22' if sanity_check else 'in-domain, 03.24.22'
+            ]
+            rand_vanilla_out = [
+                'binary-bert', 'rand, vanilla', 'out-of-domain, 05.03.22' if sanity_check else 'out-of-domain, 04.06.22'
+            ]
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22']
         # intended for writing out table, will write all the data
         d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
         self.config_dict = {
@@ -48,13 +71,10 @@ class ChoreConfig:
                 'out': sum(d_dset_names_all['out'].values(), start=[])
             },
             'train-setup2dset-eval-path': OrderedDict({
-                ('binary-bert', 'rand', 'vanilla', 'in', '3ep'):
-                    ['binary-bert', 'rand, vanilla', 'in-domain, 05.03.22' if sanity_check else 'in-domain, 03.24.22'],
+                ('binary-bert', 'rand', 'vanilla', 'in', '3ep'): rand_vanilla_in,
                 ('binary-bert', 'rand', 'vanilla', 'in', '5ep'):
                     ['binary-bert', f'rand, vanilla, 5ep, {shuffle}-shuffle', 'in-domain, 04.26.22'],
-                ('binary-bert', 'rand', 'vanilla', 'out', '3ep'):
-                    ['binary-bert', 'rand, vanilla',
-                     'out-of-domain, 05.03.22' if sanity_check else 'out-of-domain, 04.06.22'],
+                ('binary-bert', 'rand', 'vanilla', 'out', '3ep'): rand_vanilla_out,
                 ('binary-bert', 'rand', 'vanilla', 'out', '5ep'):
                     ['binary-bert',  f'rand, vanilla, 5ep, {shuffle}-shuffle', 'out-of-domain, 04.26.22'],
                 ('binary-bert', 'rand', 'implicit', 'in', '3ep'):
@@ -74,17 +94,15 @@ class ChoreConfig:
                 ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '5ep'):
                     ['binary-bert', 'rand, implicit-text, 5ep', 'out-of-domain, 04.25.22'],
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '3ep'):
-                    ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22'],
+                    rand_implicit_sep_in,
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '5ep'):
                     ['binary-bert', 'rand, implicit-sep, 5ep', 'in-domain, 04.25.22'],
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '3ep'):
-                    ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22'],
+                    rand_implicit_sep_out,
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '5ep'):
                     ['binary-bert', 'rand, implicit-sep, 5ep', 'out-of-domain, 04.25.22'],
-                ('binary-bert', 'rand', 'explicit', 'in', '3ep'):
-                    ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22'],
-                ('binary-bert', 'rand', 'explicit', 'out', '3ep'):
-                    ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22'],
+                ('binary-bert', 'rand', 'explicit', 'in', '3ep'): rand_explicit_in,
+                ('binary-bert', 'rand', 'explicit', 'out', '3ep'): rand_explicit_out,
                 ('binary-bert', 'vect', 'vanilla', 'in', '3ep'):
                     ['binary-bert', 'vect, vanilla', 'in-domain, 03.05.22'],
 
@@ -203,7 +221,6 @@ def dataset_acc(
         suppress_not_found: Union[bool, Any] = False, return_type: str = 'dict'
 ) -> Union[Dict[str, Union[float, Any]], float]:
     def get_single(dnm) -> Union[float, Any]:
-        # ic(dnm, dnm2csv_path(dnm))
         path = dnm2csv_path(dnm)
         if not os.path.exists(path) and suppress_not_found:
             return None

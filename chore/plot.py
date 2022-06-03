@@ -1,3 +1,4 @@
+from collections.abc import Sized
 from os.path import join as os_join
 from typing import List, Tuple, Dict, Callable, Union
 from collections import OrderedDict
@@ -78,7 +79,7 @@ def plot_class_heatmap(
 
 
 def plot_setups_acc(
-        setups: List[Dict[str, str]], domain: str = 'in',
+        setups: List[Dict[str, str]], domain: str = 'in', aspects: Union[List[str], str] = sconfig('UTCD.aspects'),
         train_strategy: str = 'vanilla', train_description: str = '3ep',
         save=False,
         color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
@@ -88,7 +89,14 @@ def plot_setups_acc(
 
     domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
     aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
-    fig, axes = plt.subplots(1, len(aspect2dnms), constrained_layout=False)
+    if isinstance(aspects, str):
+        aspects = [aspects]
+
+    fig_sz = 1 + 5*len(aspects), 9
+    aspect2dnms = {k: v for k, v in aspect2dnms.items() if k in aspects}
+    fig, axes = plt.subplots(1, len(aspect2dnms), figsize=fig_sz, constrained_layout=False)
+    if not isinstance(axes, Sized):
+        axes = [axes]
     # color-code by model name
     color_opns = list(OrderedDict((d[color_code_by], None) for d in setups))
     cs = sns.color_palette(palette='husl', n_colors=len(color_opns))
@@ -119,8 +127,8 @@ def plot_setups_acc(
         ax.set_xticks(dnm_ints, labels=[dnms[i] for i in dnm_ints])
         ax.set_title(f'{aspect} split')
     else:
-        scores = np.concatenate([l.get_ydata() for ax in axes for l in ax.lines])
-        edges = [np.concatenate([l.get_xdata() for l in ax.lines]) for ax in axes]
+        scores = np.concatenate([ln.get_ydata() for ax in axes for ln in ax.lines])
+        edges = [np.concatenate([ln.get_xdata() for ln in ax.lines]) for ax in axes]
         ma, mi = np.max(scores), np.min(scores)
         ma, mi = min(round(ma, -1)+10, 100), max(round(mi, -1)-10, -5)
         for ax, edges_ in zip(axes, edges):
@@ -138,7 +146,7 @@ def plot_setups_acc(
     fig.supylabel('Classification Accuracy (%)')
     fig.supxlabel('Dataset')
 
-    legend_v_ratio = 0.15
+    legend_v_ratio = 0.03 + 0.03 * len(setups)
     handles, labels = plt.gca().get_legend_handles_labels()  # Distinct labels
     # move up a bit so that don't block xlabel
     loc_args = dict(loc='lower center', bbox_to_anchor=(0.5, 0.05), bbox_transform=fig.transFigure)
@@ -257,10 +265,23 @@ if __name__ == '__main__':
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
         plot_setups_acc(
-            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
+            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
             ylim=(0, 100), title=title
         )
-    # plot_berts_implicit(domain='in')
-    plot_berts_implicit(domain='out')
+    plot_berts_implicit(domain='in')
+    # plot_berts_implicit(domain='out')
     # plot_berts_implicit(domain='in', with_5ep=True)
     # plot_berts_implicit(domain='out', with_5ep=True)
+
+    def plot_intent_only(domain: str = 'in'):
+        setups = [
+            ('binary-bert', 'rand', 'vanilla'),
+            ('binary-bert', 'rand', 'implicit-on-text-encode-sep'),
+        ]
+        setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
+        plot_setups_acc(
+            setups, domain=domain, aspects='intent', save=True,
+            color_code_by='training_strategy', pretty_keys='training_strategy'
+        )
+    # plot_intent_only(domain='in')
+    # plot_intent_only(domain='out')
