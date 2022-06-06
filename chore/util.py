@@ -35,6 +35,9 @@ class ChoreConfig:
         shuffle = 'new'
         sanity_check = True
         explicit_v2 = True
+        # train_trial = 'default'
+        # train_trial = 'intent-only'
+        train_trial = 'asp-norm'
         intent_only = False
         # intent_only = True
         if explicit_v2:
@@ -43,12 +46,8 @@ class ChoreConfig:
         else:
             rand_explicit_in = ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22']
             rand_explicit_out = ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22']
-        if intent_only:
-            rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
-            rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
-            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
-            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
-        else:
+
+        if train_trial == 'default':
             rand_vanilla_in = [
                 'binary-bert', 'rand, vanilla', 'in-domain, 05.03.22' if sanity_check else 'in-domain, 03.24.22'
             ]
@@ -57,6 +56,22 @@ class ChoreConfig:
             ]
             rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22']
             rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22']
+        elif train_trial == 'intent-only':
+            rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
+            rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
+        else:
+            assert train_trial == 'asp-norm'
+            rand_vanilla_in = ['binary-bert', 'rand, vanilla, asp-norm', 'in-domain, 06.04.22']
+            rand_vanilla_out = ['binary-bert', 'rand, vanilla, asp-norm', 'out-of-domain, 06.04.22']
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, asp-norm', 'in-domain, 06.04.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.04.22']
+
+            assert explicit_v2
+            rand_explicit_in = ['binary-bert', 'rand, explicit, asp-norm', 'in-domain, 06.06.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit, asp-norm', 'out-of-domain, 06.06.22']
+            # TODO: add explicit
         # intended for writing out table, will write all the data
         d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
         self.config_dict = {

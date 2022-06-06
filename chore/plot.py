@@ -254,8 +254,8 @@ if __name__ == '__main__':
         else:
             _setups = [
                 ('binary-bert', 'rand', 'vanilla'),
-                ('binary-bert', 'rand', 'implicit'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
+                # ('binary-bert', 'rand', 'implicit'),
+                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep'),
                 ('binary-bert', 'rand', 'explicit')
             ]
@@ -264,12 +264,13 @@ if __name__ == '__main__':
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
+        title = f'Aspect-Normalized {title}'
         plot_setups_acc(
-            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
             ylim=(0, 100), title=title
         )
     plot_berts_implicit(domain='in')
-    # plot_berts_implicit(domain='out')
+    plot_berts_implicit(domain='out')
     # plot_berts_implicit(domain='in', with_5ep=True)
     # plot_berts_implicit(domain='out', with_5ep=True)
 
@@ -279,6 +280,8 @@ if __name__ == '__main__':
             ('binary-bert', 'rand', 'implicit-on-text-encode-sep'),
         ]
         setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in setups]
+        domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+        title = f'Intent-split-only Training Classification Accuracy - {domain_str} evaluation '
         plot_setups_acc(
             setups, domain=domain, aspects='intent', save=True,
             color_code_by='training_strategy', pretty_keys='training_strategy'
