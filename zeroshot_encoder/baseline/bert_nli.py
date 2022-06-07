@@ -10,40 +10,45 @@ from sklearn.metrics import classification_report
 from torch.utils.data import DataLoader
 from sentence_transformers.cross_encoder import CrossEncoder
 from sentence_transformers.cross_encoder.evaluation import CESoftmaxAccuracyEvaluator
-from zeroshot_encoder.util.load_data import get_data, binary_cls_format, nli_cls_format, get_nli_data, nli_template, in_domain_data_path, out_of_domain_data_path
+from zeroshot_encoder.util.load_data import (
+    get_data, binary_cls_format, nli_cls_format, get_nli_data, nli_template,
+    in_domain_data_path, out_of_domain_data_path
+)
+
 
 random.seed(42)
 
-def parse_args():
 
-    parser =  ArgumentParser()
+def parse_args():
+    parser = ArgumentParser()
     subparser = parser.add_subparsers(dest='command')
-    train = subparser.add_parser('train')
-    test = subparser.add_parser('test')
-    pre_train = subparser.add_parser('pre_train')
+    parser_train = subparser.add_parser('train')
+    parser_test = subparser.add_parser('test')
+    parser_pretrain = subparser.add_parser('pre_train')
 
     # set train arguments
-    train.add_argument('--output', type=str, required=True)
-    train.add_argument('--sampling', type=str, choices=['rand', 'vect'], required=True)
-    train.add_argument('--mode', type=str, choices=['vanilla', 'implicit', 'explicit'], default='vanilla')
-    train.add_argument('--base_model', type=str, required=True)
-    train.add_argument('--batch_size', type=int, default=16)
-    train.add_argument('--epochs', type=int, default=3)
-    
+    parser_train.add_argument('--output', type=str, required=True)
+    parser_train.add_argument('--sampling', type=str, choices=['rand', 'vect'], required=True)
+    parser_train.add_argument('--mode', type=str, choices=['vanilla', 'implicit', 'explicit'], default='vanilla')
+    parser_train.add_argument('--base_model', type=str, required=True)
+    parser_train.add_argument('--batch_size', type=int, default=16)
+    parser_train.add_argument('--epochs', type=int, default=3)
 
     # set test arguments
-    test.add_argument('--model_path', type=str, required=True)
-    test.add_argument('--domain', type=str, choices=['in', 'out'] ,required=True)
-    test.add_argument('--mode', type=str, choices=['vanilla', 'implicit', 'explicit'], default='vanilla')
+    parser_test.add_argument('--model_path', type=str, required=True)
+    parser_test.add_argument('--domain', type=str, choices=['in', 'out'] ,required=True)
+    parser_test.add_argument('--mode', type=str, choices=['vanilla', 'implicit', 'explicit'], default='vanilla')
 
-    # sest pre-train arguments
-    pre_train.add_argument('--output', type=str, required=True)
-    pre_train.add_argument('--batch_size', type=int, default=16)
-    pre_train.add_argument('--epochs', type=int, default=3)
+    # set pre-train arguments
+    parser_pretrain.add_argument('--output', type=str, required=True)
+    parser_pretrain.add_argument('--batch_size', type=int, default=16)
+    parser_pretrain.add_argument('--epochs', type=int, default=3)
     
     return parser.parse_args()
 
+
 logger = logging.getLogger(__name__)
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -56,7 +61,7 @@ if __name__ == "__main__":
         model = CrossEncoder('bert-base-uncased', num_labels=3)
 
         train_dataloader = DataLoader(train, shuffle=True, batch_size=train_batch_size)
-        warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1) #10% of train data for warm-up
+        warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1)  # 10% of train data for warm-up
         logger.info("Warmup-steps: {}".format(warmup_steps))
 
         evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(dev, name='AllNLI-dev')
@@ -98,7 +103,7 @@ if __name__ == "__main__":
 
         evaluator = CESoftmaxAccuracyEvaluator.from_input_examples(test, name='UTCD-test')
 
-        warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1) #10% of train data for warm-up
+        warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1)  # 10% of train data for warm-up
         logger.info("Warmup-steps: {}".format(warmup_steps))
 
         # Train the model

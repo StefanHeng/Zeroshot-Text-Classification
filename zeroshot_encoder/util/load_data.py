@@ -25,7 +25,7 @@ from zeroshot_encoder.util import *
 __all__ = [
     'in_domain_url', 'out_of_domain_url', 'in_domain_data_path', 'out_of_domain_data_path',
     'get_data', 'sample_data',
-    'get_nli_data', 'binary_cls_format', 'nli_cls_format', 'encoder_cls_format', 'seq_cls_format',
+    'nli_template', 'get_nli_data', 'binary_cls_format', 'nli_cls_format', 'encoder_cls_format', 'seq_cls_format',
     'binary_explicit_format'
 ]
 
@@ -174,6 +174,7 @@ def get_nli_data():
 
 
 def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanilla'):
+    ca.check_mismatch('Data Negative Sampling', sampling, ['rand', 'vect'])
     logger = get_logger('Binary CLS format')
     examples = []
     aspect = data['aspect']

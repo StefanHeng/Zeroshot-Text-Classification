@@ -31,7 +31,7 @@ def parse_args():
 
     # set train arguments
     parser_train.add_argument('--output', type=str, default=None)
-    parser_train.add_argument('--sampling', type=str, choices=['rand', 'vect'], default='vanilla')
+    parser_train.add_argument('--sampling', type=str, choices=['rand', 'vect'], default='rand')
     parser_train.add_argument('--mode', type=str, choices=modes, default='vanilla')
     parser_train.add_argument('--batch_size', type=int, default=16)
     parser_train.add_argument('--epochs', type=int, default=3)
@@ -67,41 +67,6 @@ if __name__ == "__main__":
             dset = data[dataset_name]
             train += binary_cls_format(dset, name=dataset_name, sampling=sampling, mode=mode)
             test += binary_cls_format(dset, train=False, mode=mode)
-
-        train_batch_size = args.batch_size
-        num_epochs = args.epochs
-        model_save_path = join(args.output, args.sampling)
-
-        # word_embedding_model = models.Transformer('bert-base-uncased', max_seq_length=256)
-        # # Add end of turn token for sgd
-        # word_embedding_model.tokenizer.add_special_tokens({'eos_token': '[eot]'})
-        # word_embedding_model.auto_model.resize_token_embeddings(len(word_embedding_model.tokenizer))
-        # pooling_model = models.Pooling(word_embedding_model.get_word_embedding_dimension())
-        #
-        # model = SentenceTransformer(modules=[word_embedding_model, pooling_model])
-        #
-        # random.shuffle(train)
-        #
-        # train_dataloader = DataLoader(train, shuffle=True, batch_size=train_batch_size)
-        # train_loss = losses.CosineSimilarityLoss(model)
-        #
-        # evaluator = evaluation.EmbeddingSimilarityEvaluator.from_input_examples(test, name='UTCD-test')
-        #
-        # warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1)  # 10% of train data for warm-up
-        # logger.info("Warmup-steps: {}".format(warmup_steps))
-        #
-        # model.fit(
-        #     train_objectives=[(train_dataloader, train_loss)],
-        #     epochs=num_epochs,
-        #     # internally, passing in an evaluator means after training ends, model not saved...
-        #     evaluator=evaluator,
-        #     warmup_steps=warmup_steps,
-        #     evaluation_steps=100000,
-        #     output_path=model_save_path
-        # )
-        # # hence, make explicit call to save model
-        # model.save(model_save_path)
-        # exit(1)
 
         # seq length for consistency w/ `binary_bert` & `sgd`
         word_embedding_model = models.Transformer('bert-base-uncased', max_seq_length=512)
