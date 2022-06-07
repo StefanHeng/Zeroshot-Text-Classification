@@ -174,6 +174,7 @@ def get_nli_data():
 
 
 def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanilla'):
+    logger = get_logger('Binary CLS format')
     examples = []
     aspect = data['aspect']
     if train:
@@ -199,7 +200,7 @@ def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanill
             vects = list(nlp.pipe(example_list, n_process=4, batch_size=128))
             print('Time Elapsed {} ms'.format((time.time() - start) * 1000))
 
-        print(f'Generating {logi(name)} examples')
+        logger.info(f'Generating {logi(name)} examples')
         for i, (text, labels) in enumerate(tqdm(data['train'].items(), desc=name)):
             if label_un_modified:
                 true_labels = labels

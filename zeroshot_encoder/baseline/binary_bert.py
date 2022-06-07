@@ -88,9 +88,10 @@ if __name__ == '__main__':
         ic(dataset_names)
         train = []
         test = []
-        for dataset in dataset_names:
-            train += binary_cls_format(data[dataset], name=dataset, sampling=args.sampling, mode=args.mode)
-            test += binary_cls_format(data[dataset], train=False, mode=args.mode)
+        for dataset_name in dataset_names:
+            dset = data[dataset_name]
+            train += binary_cls_format(dset, name=dataset_name, sampling=args.sampling, mode=args.mode)
+            test += binary_cls_format(dset, train=False, mode=args.mode)
 
         train_batch_size = args.batch_size
         num_epochs = args.epochs
@@ -113,7 +114,7 @@ if __name__ == '__main__':
         model.model.resize_token_embeddings(len(model.tokenizer))
 
         transformers.logging.set_verbosity_error()  # disables `longest_first` warning
-        transformers.set_seed(seed)
+        random.seed(seed)
         new_shuffle = True
         random.shuffle(train)  # TODO: always need this?
         if new_shuffle:
@@ -127,6 +128,7 @@ if __name__ == '__main__':
         warmup_steps = math.ceil(len(train_dataloader) * num_epochs * 0.1)  # 10% of train data for warm-up
         logger.info("Warmup-steps: {}".format(warmup_steps))
 
+        transformers.set_seed(seed)
         # Train the model
         model.fit(
             train_dataloader=train_dataloader,
