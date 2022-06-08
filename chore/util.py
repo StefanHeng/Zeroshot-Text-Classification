@@ -6,7 +6,7 @@ from collections import OrderedDict
 import pandas as pd
 
 from stefutil import *
-from zeroshot_encoder.util import *
+from zeroshot_classifier.util import *
 
 
 __all__ = ['get_chore_base', 'ChoreConfig', 'cconfig', 'get_dnm2csv_path_fn', 'prettier_setup', 'dataset_acc']

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from stefutil import *
-from zeroshot_encoder.util import *
+from zeroshot_classifier.util import *
 from chore.util import *
 
 
