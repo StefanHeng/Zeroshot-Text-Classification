@@ -3,25 +3,41 @@ from typing import List, Tuple, Dict, Callable, Union
 
 import datasets
 
-from zeroshot_encoder.util.data_path import PROJ_DIR, DSET_DIR
+from stefutil import *
+from zeroshot_encoder.util import *
+from zeroshot_encoder.util import load_data
 import zeroshot_encoder.util.utcd as utcd_util
 
 
 def get_dataset(
-        dataset_name='ag_news',
+        dataset_name='ag_news', normalize_aspect: bool = False,
         map_func: Union[Dict[str, Callable], Callable] = None, filter_func: Callable = None,
         remove_columns: Union[str, List[str]] = None,
         n_sample: int = None, shuffle_seed: int = None, fast=True, from_disk=True,
         splits: Union[str, List[str], Tuple[str]] = ('train', 'test')
 ) -> List[datasets.Dataset]:
+    logger = get_logger('Get Dataset')
     if from_disk:
-        path = os.path.join(utcd_util.get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
-        dset = datasets.load_from_disk(path)
+        path = os.path.join(utcd_util.get_output_base(), u.proj_dir, u.dset_dir, 'processed', dataset_name)
+        dsets = datasets.load_from_disk(path)
+
+        if normalize_aspect:  # TODO: ugly but works
+            logger.info(f'Normalizing training data by #sample per aspect with {logi(normalize_aspect)}...')
+            _data = load_data.get_data(load_data.in_domain_data_path, normalize_aspect=normalize_aspect)
+            # apply #sample normalization to the training set
+            id2nm = sconfig('UTCD.dataset_id2name')
+            # cos the same text may appear in multiple datasets
+            dsets['train'] = dsets['train'].filter(
+                lambda example: example['text'] in _data[id2nm[example['dataset_id']]]['train'])
+            n = len(dsets['train'])
+            # sanity check, same # of pairs as in Chris' data loading
+            assert n == sum(len(d['train']) for d in _data.values())
+            logger.info(f'Remaining #train pairs: {logi(n)}')
     else:
-        dset = datasets.load_dataset(dataset_name)
+        dsets = datasets.load_dataset(dataset_name)
     if isinstance(splits, str):
         splits = [splits]
-    dsets = [dset[s] for s in splits]
+    dsets = [dsets[s] for s in splits]
     num_proc = None
     n_cpu = os.cpu_count()
     if fast and n_cpu >= 2:

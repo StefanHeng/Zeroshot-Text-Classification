@@ -17,7 +17,6 @@ if is_torch_tpu_available():
     import torch_xla.core.xla_model as xm
     import torch_xla.distributed.parallel_loader as pl
 
-from stefutil import *
 from zeroshot_encoder.util.data_path import BASE_PATH, PROJ_DIR
 from zeroshot_encoder.util.util import *
 from zeroshot_encoder.util.train import *
@@ -110,7 +109,7 @@ class MyLoggingCallback(TrainerCallback):
             self.train_end = True
 
             self.t_end = datetime.datetime.now()
-            t = fmt_dt(self.t_end - self.t_strt)
+            t = fmt_delta(self.t_end - self.t_strt)
             self.logger.info(f'Training completed in {logi(t)} ')
             self.logger_fl.info(f'Training completed in {t} ')
 

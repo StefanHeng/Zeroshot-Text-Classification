@@ -19,12 +19,11 @@ import torch
 from torch import nn
 from sklearn.metrics import classification_report
 import transformers
-from transformers import BatchEncoding
-from transformers import AutoConfig
-from transformers import GPT2TokenizerFast
-from transformers import GPT2Model, GPT2LMHeadModel  # LMHead for CLM training
-from transformers import Trainer, TrainingArguments, SchedulerType
-from transformers import DataCollatorForLanguageModeling
+from transformers import (
+    BatchEncoding, AutoConfig,
+    GPT2TokenizerFast, GPT2Model, GPT2LMHeadModel,
+    Trainer, TrainingArguments, SchedulerType, DataCollatorForLanguageModeling
+)
 from transformers.file_utils import ModelOutput
 from transformers.training_args import OptimizerNames
 import datasets
@@ -37,7 +36,7 @@ import zeroshot_encoder.util.utcd as utcd_util
 from zeroshot_encoder.preprocess import get_dataset
 
 
-MODEL_NAME = 'gpt2-nvidia'
+MODEL_NAME = 'NVIDIA-GPT2'
 
 
 class ZsGPT2Tokenizer(GPT2TokenizerFast):
@@ -53,6 +52,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         ('type_text', '[TEXT]'),
         ('type_answ', '[ANSW]')
     ])
+    _aspect_sep_token = '[ASPECT_SEP]'   # for implicit training, passing in aspect as part of `text`
 
     class Cache(dict):
         """
@@ -87,13 +87,25 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 )
             return super().__getitem__(key)
 
-    def __init__(self, **kwargs):
+    def __init__(self, form: str = 'vanilla', **kwargs):
+        """
+        :param form: One of [`vanilla`, `implicit`]
+            See `binary_bert::modes`
+        """
         super().__init__(**kwargs)
         # Pad token cannot be `self.eos_token`
         # cos otherwise `DataCollatorForLanguageModeling` would override normal eos tokens
-        self.add_special_tokens(dict(
-            pad_token='[PAD]', additional_special_tokens=list(ZsGPT2Tokenizer.SPEC_TOKS.values())
-        ))
+        spec_toks = list(ZsGPT2Tokenizer.SPEC_TOKS.values())
+        ca.check_mismatch('Formalization mode', form, ['vanilla', 'implicit'])
+        self.form = form
+        self.did2aspect, aspect_sep_token = None, None
+        if form == 'implicit':
+            self.aspect_sep_token = ZsGPT2Tokenizer._aspect_sep_token
+            spec_toks.append(self.aspect_sep_token)
+            did2nm = sconfig('UTCD.dataset_id2name')
+            self.did2aspect = {did: sconfig(f'UTCD.datasets.{dnm}.aspect') for did, dnm in enumerate(did2nm)}
+            mic(self.did2aspect)
+        self.add_special_tokens(dict(pad_token='[PAD]', additional_special_tokens=spec_toks))
 
         self.templates = sconfig('baselines.gpt2-nvidia.templates')
         # Mapping from dataset name to label for non-UTCD cases
@@ -128,7 +140,8 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
     def __call__(
             self, samples: Dict[str, Union[List, str, int]],
-            dataset_name: str = 'UTCD', split: str = 'train', mode: str = 'train', **kwargs
+            dataset_name: str = 'UTCD', split: str = 'train', mode: str = 'train',
+            **kwargs
     ):
         """
         :param samples: Data sample(s) with keys [`dataset_name`, `label`, `text`]
@@ -142,8 +155,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     i.e. Intended for prediction, see `evaluate_trained`
             If `stats`, the entire sample is tokenized without truncation
         """
-        modes = ['train', 'inference', 'stats', 'inference-sample']
-        assert mode in modes, f'Unexpected mode: Expect one of {logi(modes)}, got {logi(mode)}'
+        ca.check_mismatch('Tokenization mode', mode, ['train', 'inference', 'stats', 'inference-sample'])
         max_length = kwargs.get('max_length', None)
         is_batched = isinstance(samples['text'], (tuple, list))
         if max_length is None:
@@ -205,6 +217,9 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
             ids_ques = self._call_paren(question, **kwargs)
             ids_text = self._call_paren(text, **kwargs)
+            if self.form == 'implicit':
+                ids_asp = self._call_paren(self.did2aspect[dataset_id], **kwargs)
+                ids_text = ids_asp + [self.enc_spec(self.aspect_sep_token)] + ids_text
             id_sep = self.enc_spec(self.ques_sep_token)
             ids_answ = [self._call_paren(a, **kwargs) for a in answers]
             ids_answ = sum(join_it(ids_answ, [id_sep]), start=[])
@@ -328,7 +343,7 @@ def pprint_gpt2_input(tokenizer: ZsGPT2Tokenizer, d: Dict[str, torch.Tensor]):
         print(' ' * n_pad, end='')
         for tid in tids_:
             print(f'{tokenizer.decode(tid):>{n_wd}}', end='')
-        print()
+        print('\n')
 
 
 class ZsGPT2LMHeadModel(GPT2LMHeadModel):
@@ -342,8 +357,8 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
     def forward(self, dataset_id=None, **kwargs):
         # Function override to ignore `dataset_id`, not need in learning; Just need to pass value for evaluation
         # if torch.any(kwargs['input_ids'] == self.tokenizer.encode(self.tokenizer.ques_sep_token)[0]):
-        # pprint_gpt2_input(self.tokenizer, d=kwargs | dict(dataset_id=dataset_id))
-        # exit(1)
+        pprint_gpt2_input(self.tokenizer, d={**kwargs, **dict(dataset_id=dataset_id)})
+        exit(1)
         return super().forward(**kwargs)
 
     @classmethod
@@ -468,7 +483,7 @@ def tokenize_func(
     return _tokenize_func
 
 
-def get_model_n_tokenizer(model_name='gpt2', save_gpu_memory: bool = True) -> Tuple[
+def get_model_n_tokenizer(model_name='gpt2', form: str = 'vanilla', save_gpu_memory: bool = True) -> Tuple[
     ZsGPT2LMHeadModel, ZsGPT2Tokenizer, DataCollatorForLanguageModeling
 ]:
     pretrained_model_name = 'gpt2'
@@ -492,7 +507,7 @@ def get_model_n_tokenizer(model_name='gpt2', save_gpu_memory: bool = True) -> Tu
         model_ = ZsGPT2LMHeadModel.from_pretrained(model_name, config=conf, ignore_mismatched_sizes=True)
 
     tokenizer_ = ZsGPT2Tokenizer.from_pretrained(
-        pretrained_model_name, use_fast=True, model_max_length=model_max_length
+        pretrained_model_name, use_fast=True, model_max_length=model_max_length, form=form
     )
     model_.resize_token_embeddings(len(tokenizer_))
     model_.tokenizer = tokenizer_
@@ -549,8 +564,10 @@ def get_train_setup(
         assert bsz_tr is not None and bsz_vl is not None
     else:
         bsz_tr = bsz_vl = bsz
+    dir_nm = f'{now(for_path=True)}_{MODEL_NAME}-{model_name}'
+    mic(os.path.join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, dir_nm))
     args = dict(
-        output_dir=os.path.join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, 'gpt2', model_name, now(for_path=True)),
+        output_dir=os.path.join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, dir_nm),
         do_train=True,
         do_eval=do_eval,
         evaluation_strategy='steps' if do_eval else 'no',
@@ -606,7 +623,7 @@ def compute_metrics(eval_pred: MyEvalPrediction):
 
 
 def get_all_setup(
-        model_name, dataset_name: str = 'ag_news',
+        model_name: str = None, dataset_name: str = 'ag_news', form: str = 'vanilla',
         n_sample=None, random_seed=None, do_eval=True, custom_logging=True,
         train_args: Dict = None, dataset_args: Dict = None,
         is_ddp: Union[bool, int] = False  # so that my own logging is correct
@@ -638,7 +655,7 @@ def get_all_setup(
     else:
         save_gpu_mem = 'arc-ts' not in get_hostname()
         # save_gpu_mem = True  # Gradient checkpointing still needed - otherwise doesn't fit in 44G GPU
-        model_, tokenizer_, data_collator_ = get_model_n_tokenizer(model_name, save_gpu_memory=save_gpu_mem)
+        model_, tokenizer_, data_collator_ = get_model_n_tokenizer(model_name, form=form, save_gpu_memory=save_gpu_mem)
         train_args_ = get_train_setup(model_name, do_eval=do_eval, train_args=train_args, save_gpu_memory=save_gpu_mem)
         tr_map_func = tokenize_func(tokenizer_, dataset_name=dataset_name, split='train')
         vl_map_func = tokenize_func(tokenizer_, dataset_name=dataset_name, split='test')
@@ -655,7 +672,7 @@ def get_all_setup(
         model=model_, args=train_args_, data_collator=data_collator_,
         train_dataset=dset_tr_, eval_dataset=dset_vl_, compute_metrics=compute_metrics
     )
-    trainer_ = MyTrainer(
+    trainer_ = GPT2Trainer(
         tokenizer=tokenizer_, custom_logging=custom_logging, compute_cls_acc=model_name != 'debug-gpt-ori',
         is_ddp=is_ddp,
         **trainer_args
@@ -957,43 +974,56 @@ if __name__ == '__main__':
 
     def new_training():
         dnm = 'UTCD-in'
-        nm = 'gpt2-medium'
-        # n = 128
-        # n = 32
-        n = None
-        # n = 256
+        # md_nm = 'debug'
+        md_nm = 'gpt2-medium'
 
-        # train_args = dict(  # overfit small
-        #     weight_decay=0,
-        #     learning_rate=3e-4,
-        #     per_device_train_batch_size=4,
-        #     num_train_epochs=128,
-        #     lr_scheduler_type=SchedulerType.CONSTANT,
-        #     gradient_accumulation_steps=8,
-        #     save_strategy='no',
-        # )
-        dataset_args = None
-        # dataset_args = dict(  # debugging
-        #     # filter_func=lambda sample: sample['dataset_id'] == config('UTCD.dataset_name2id')['dbpedia'],
-        #     filter_func=lambda sample: len(sample['labels']) > 1,
-        # )
-        # train_args = dict(
-        #     num_train_epochs=3,
-        #     per_device_train_batch_size=4,
-        # gradient_accumulation_steps = 8
-        # )
-        train_args = dict(  # Distribute among GPUs & fit in memory; Effectively batch size 128 as in paper
-            num_train_epochs=3,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=8
-        )
-        md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(
-            nm, dnm, do_eval=False, custom_logging=True, n_sample=n, random_seed=seed,
+        form = 'vanilla'
+        # form = 'implicit'
+
+        # n = 32
+        # n = 128
+        n = 256
+        # n = None
+
+        asp_norm = True
+
+        if 'debug' in md_nm:
+            # train_args = dict(  # overfit small
+            #     weight_decay=0,
+            #     learning_rate=3e-4,
+            #     per_device_train_batch_size=4,
+            #     num_train_epochs=128,
+            #     lr_scheduler_type=SchedulerType.CONSTANT,
+            #     gradient_accumulation_steps=8,
+            #     save_strategy='no',
+            # )
+            dataset_args = dict(  # debugging
+                # filter_func=lambda sample: sample['dataset_id'] == config('UTCD.dataset_name2id')['dbpedia'],
+                # filter_func=lambda sample: len(sample['labels']) > 1,
+            )
+            train_args = dict(
+                num_train_epochs=3,
+                per_device_train_batch_size=4
+            )
+            ddp = False
+        else:
+            dataset_args = dict(normalize_aspect=asp_norm)
+            train_args = dict(  # Distribute among GPUs & fit in memory; Effectively batch size 128 as in paper
+                num_train_epochs=3,
+                # per_device_train_batch_size=4,
+                per_device_train_batch_size=16,
+                gradient_accumulation_steps=8
+            )
+            ddp = 4
+        md, tkzer, dset_tr, dset_vl, trainer = get_all_setup(  # eval set is too large
+            model_name=md_nm, dataset_name=dnm, form=form, do_eval=False, custom_logging=True, n_sample=n,
+            random_seed=seed,
+            # random_seed=1,
             train_args=train_args, dataset_args=dataset_args,
-            is_ddp=4
+            is_ddp=ddp
         )
         trainer.train()
-    # new_training()
+    new_training()
 
     def sanity_check_trained_generate():
         text = 'hello world'
@@ -1002,4 +1032,4 @@ if __name__ == '__main__':
         ic(gpt2_inference(text, label_options))
     # sanity_check_trained_generate()
 
-    plot_dataset_token_length_stats(domain='in')
+    # plot_dataset_token_length_stats(domain='in')

@@ -592,17 +592,17 @@ if __name__ == '__main__':
         ic(lbs)
         ic(vl[60])
         ic(lbs.int2str(154))
-    # sanity_check('UTCD-in')
+    sanity_check('UTCD-in')
 
     def get_utcd_in():
         process_utcd_dataset(domain='in', join=True)
         sanity_check('UTCD-in')
-    get_utcd_in()
+    # get_utcd_in()
 
     # get_utcd_from_gdrive(domain='out')
 
     def get_utcd_out():
-        process_utcd_dataset(domain='out', join=False)
+        process_utcd_dataset(domain='out', join=True)
         sanity_check('UTCD-out')
     # get_utcd_out()
 

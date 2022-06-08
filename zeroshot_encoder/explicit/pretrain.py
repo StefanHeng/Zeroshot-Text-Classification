@@ -31,7 +31,7 @@ HF_MODEL_NAME = 'bert-base-uncased'
 
 
 def get_dataset(
-        dataset_name: str = 'UTCD-in', tokenizer: BertTokenizer = None, normalize_aspect: Union[bool, int] = False,
+        dataset_name: str = 'UTCD-in', tokenizer: BertTokenizer = None,
         **kwargs
 ) -> List[Dataset]:
     """
@@ -39,22 +39,6 @@ def get_dataset(
     """
     # perform preprocessing outside `get_dataset` as feature from the dataset is needed
     dsets = get_dset(dataset_name, **kwargs)  # by split
-
-    if normalize_aspect:  # TODO: ugly but works
-        _data = load_data.get_data(load_data.in_domain_data_path, normalize_aspect=normalize_aspect)
-        ic(sum(len(d['train']) for d in _data.values()))
-        txts = set().union(*[d_dset['train'] for d_dset in _data.values()])
-        ic(dsets, len(dsets))
-        ic(len(txts))
-        # apply #sample normalization to the training set
-        id2nm = sconfig('UTCD.dataset_id2name')
-        # dsets[0] = dsets[0].filter(lambda example: example['text'] in txts)
-        # cos the same text may appear in multiple datasets
-        dsets[0] = dsets[0].filter(lambda example: example['text'] in _data[id2nm[example['dataset_id']]]['train'])
-        ic(len(dsets[0]))
-        # exit(1)
-    # trn: Dataset
-    # tst: Dataset
 
     aspects: List[str] = sconfig('UTCD.aspects')
     aspect2id = {a: i for i, a in enumerate(aspects)}
@@ -77,15 +61,6 @@ def get_dataset(
     if is_combined:
         rmv.append('dataset_id')
     dsets = [dset.map(map_fn, batched=True, remove_columns=rmv, load_from_cache_file=False) for dset in dsets]
-    # trn = trn.map(map_fn, batched=True, remove_columns=rmv)
-    # tst = tst.map(map_fn, batched=True, remove_columns=rmv)
-    # ic(dsets[0][:2])
-    # for k, v in trn[:2].items():
-    #     v = v[0]
-    #     ic(k, type(v))
-    #     if isinstance(v, list):
-    #         ic(len(v))
-    # exit(1)
     return dsets
 
 
@@ -247,7 +222,7 @@ if __name__ == '__main__':
                 trainer_.train(resume_from_checkpoint=resume_from_checkpoint)
             else:
                 trainer_.train()
-    # train()
+    train()
     # dir_nm_ = '2022-05-16_21-25-30/checkpoint-274088'
     # ckpt_path = os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm_)
     # train(resume_from_checkpoint=ckpt_path)
@@ -307,4 +282,4 @@ if __name__ == '__main__':
         path = os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm)
         tokenizer = BertTokenizer.from_pretrained(HF_MODEL_NAME)  # TODO: should add eot token as in updated training
         tokenizer.save_pretrained(path)
-    fix_save_tokenizer()
+    # fix_save_tokenizer()
