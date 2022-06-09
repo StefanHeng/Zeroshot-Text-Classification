@@ -1,8 +1,12 @@
+import os
+import datetime
 import configparser
 from os.path import join as os_join
-from typing import Dict
+from typing import List, Tuple, Dict, Iterable
 
 import numpy as np
+import pandas as pd
+import sklearn
 import matplotlib.pyplot as plt
 
 from zeroshot_classifier.util.data_path import BASE_PATH, PROJ_DIR, DSET_DIR, PKG_NM, MODEL_DIR
@@ -11,7 +15,10 @@ from zeroshot_classifier.util.data_path import BASE_PATH, PROJ_DIR, DSET_DIR, PK
 from stefutil import ca, StefConfig, StefUtil
 
 
-__all__ = ['sconfig', 'u', 'save_fig', 'plot_points']
+__all__ = [
+    'sconfig', 'u', 'save_fig', 'plot_points',
+    'map_model_output_path', 'domain2eval_dir_nm', 'get_dataset_names', 'TrainStrategy2PairMap', 'eval_res2df'
+]
 
 
 sconfig = StefConfig(config_file=os_join(BASE_PATH, PROJ_DIR, PKG_NM, 'util', 'config.json')).__call__
@@ -38,6 +45,86 @@ def plot_points(arr, **kwargs):
 
 def config_parser2dict(conf: configparser.ConfigParser) -> Dict:
     return {sec: dict(conf[sec]) for sec in conf.sections()}
+
+
+def map_model_dir_nm(
+        model_name: str = None, name: str = None, mode: str = 'vanilla', sampling: str = 'rand',
+        normalize_aspect: bool = False
+) -> str:
+    out = f'{now(for_path=True)}_{model_name}'
+    if name:
+        out = f'{out}-{name}'
+    out = f'{out}-{mode}-{sampling}'
+    if normalize_aspect:
+        out = f'{out}-aspect-norm'
+    return out
+
+
+def map_model_output_path(
+        model_name: str = None, output_path: str = None, mode: str = 'vanilla', sampling: str = 'rand',
+        normalize_aspect: bool = False
+) -> str:
+    def _map(dir_nm):
+        return map_model_dir_nm(model_name, dir_nm, mode, sampling, normalize_aspect)
+    if output_path:
+        paths = output_path.split(os.sep)
+        output_dir = _map(paths[-1])
+        return os_join(*paths[:-1], output_dir)
+    else:
+        return os_join(u.proj_path, u.model_dir, _map(None))
+
+
+def domain2eval_dir_nm(domain: str = 'in'):
+    domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+    date = datetime.datetime.now().strftime('%m.%d.%Y')
+    date = date[:-4] + date[-2:]  # 2-digit year
+    return f'{domain_str}, {date}'
+
+
+def get_dataset_names(domain: str = 'in'):
+    return [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
+
+
+class TrainStrategy2PairMap:
+    sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
+    aspect2aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')
+
+    def __init__(self, train_strategy: str = 'vanilla'):
+        self.train_strategy = train_strategy
+        ca(training_strategy=train_strategy)
+
+    def __call__(self, aspect: str = None):
+        if self.train_strategy in ['vanilla', 'explicit']:
+            def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
+                return [[txt, lb] for lb in lbs]
+        elif self.train_strategy == 'implicit':
+            def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
+                return [[txt, f'{lb} {aspect}'] for lb in lbs]
+        elif self.train_strategy == 'implicit-on-text-encode-aspect':
+            def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
+                return [[f'{TrainStrategy2PairMap.aspect2aspect_token[aspect]} {txt}', lb] for lb in lbs]
+        else:
+            assert self.train_strategy == 'implicit-on-text-encode-sep'
+
+            def txt_n_lbs2query(txt: str, lbs: List[str]) -> List[List[str]]:
+                return [[f'{aspect} {TrainStrategy2PairMap.sep_token} {txt}', lb] for lb in lbs]
+        return txt_n_lbs2query
+
+    def map_label(self, label: str, aspect: str = None):
+        return f'{label} {aspect}' if self.train_strategy == 'implicit' else label
+
+    def map_text(self, text: str, aspect: str = None):
+        if self.train_strategy == 'implicit-on-text-encode-aspect':
+            return f'{TrainStrategy2PairMap.aspect2aspect_token[aspect]} {text}'
+        elif self.train_strategy == 'implicit-on-text-encode-sep':
+            return f'{aspect} {TrainStrategy2PairMap.sep_token} {text}'
+        else:
+            return text
+
+
+def eval_res2df(labels: Iterable, preds: Iterable, **kwargs) -> Tuple[pd.DataFrame, float]:
+    report = sklearn.metrics.classification_report(labels, preds, **kwargs)
+    return pd.DataFrame(report).transpose(), round(report["accuracy"], 3)
 
 
 if __name__ == '__main__':
