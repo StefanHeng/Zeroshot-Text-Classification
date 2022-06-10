@@ -5,6 +5,7 @@ datasets/
 dataset/
 dataset_obsolete/
 models/
+!zeroshot_classifier/models
 test_lang*
 examples/
 chore/*/
