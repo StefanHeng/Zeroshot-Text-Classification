@@ -83,12 +83,12 @@ def plot_setups_acc(
         train_strategy: str = 'vanilla', train_description: str = '3ep',
         save=False,
         color_code_by: str = 'model_name', pretty_keys: Union[str, Tuple[str]] = ('sampling_strategy',),
-        title: str = None, ylim: Tuple[int, int] = None,
+        title: str = None, ylim: Tuple[int, int] = None, chore_config: ChoreConfig = cconfig
 ):
     ca(dataset_domain=domain)
 
     domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-    aspect2dnms = cconfig('domain2aspect2dataset-names')[domain]
+    aspect2dnms = chore_config('domain2aspect2dataset-names')[domain]
     if isinstance(aspects, str):
         aspects = [aspects]
 
@@ -111,7 +111,7 @@ def plot_setups_acc(
             ca(model_name=md_nm, sampling_strategy=sample_strat, training_strategy=train_strategy)
             path = get_dnm2csv_path_fn(
                 model_name=md_nm, sampling_strategy=sample_strat, domain=domain,
-                training_strategy=train_strat, train_description=train_desc
+                training_strategy=train_strat, train_description=train_desc, chore_config=chore_config
             )
             # As percentage
             scores = [a*100 for a in dataset_acc(dataset_names=dnms, dnm2csv_path=path, return_type='list')]
@@ -236,7 +236,14 @@ if __name__ == '__main__':
         # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
     # plot_in_implicit()
 
-    def plot_berts_implicit(domain: str = 'in', with_5ep=False):
+    def plot_one_model(domain: str = 'in', with_5ep=False):
+        # md_nm = 'binary-bert'
+        # md_nm = 'bi-encoder'
+        md_nm = 'gpt2-nvidia'
+        if md_nm == 'gpt2-nvidia':
+            tr_strat = 'NA'
+        else:
+            tr_strat = 'rand'
         if with_5ep:
             _setups = [
                 ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
@@ -253,26 +260,29 @@ if __name__ == '__main__':
             setups = [dict(zip(keys, s)) for s in _setups]
         else:
             _setups = [
-                ('binary-bert', 'rand', 'vanilla'),
-                # ('binary-bert', 'rand', 'implicit'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect'),
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep'),
-                ('binary-bert', 'rand', 'explicit')
+                # (md_nm, tr_strat, 'vanilla'),
+                # (md_nm, tr_strat, 'implicit'),
+                # (md_nm, tr_strat, 'implicit-on-text-encode-aspect'),
+                (md_nm, tr_strat, 'implicit-on-text-encode-sep'),
+                # (md_nm, tr_strat, 'explicit')
             ]
             setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
         # ic(setups)
 
+        ttrial = 'asp-norm'
+        chore_config = ChoreConfig(train_trial=ttrial)
+
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-        title = f'Training Classification Accuracy - {domain_str} evaluation with Random Sapling'
-        title = f'Aspect-Normalized {title}'
+        md_nm = cconfig('pretty.model-name')[md_nm]
+        title = f'{md_nm} Training Classification Accuracy - {domain_str.capitalize()} evaluation with Random Sapling'
+        if ttrial:
+            title = f'Aspect-Normalized {title}'
         plot_setups_acc(
-            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
-            ylim=(0, 100), title=title
+            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            ylim=(0, 100), title=title, chore_config=chore_config
         )
-    plot_berts_implicit(domain='in')
-    plot_berts_implicit(domain='out')
-    # plot_berts_implicit(domain='in', with_5ep=True)
-    # plot_berts_implicit(domain='out', with_5ep=True)
+    # plot_one_model(domain='in')
+    plot_one_model(domain='out')
 
     def plot_intent_only(domain: str = 'in'):
         setups = [

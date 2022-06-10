@@ -1,5 +1,9 @@
+import os
 import csv
+from typing import List, Tuple, Dict, Union
+from collections import OrderedDict
 
+from stefutil import *
 from chore.util import *
 
 
@@ -17,9 +21,98 @@ def summaries2table_row(summaries: List[Dict], exp='latex', acc_only: bool = Tru
         raise ValueError('Unexpected type')
 
 
-if __name__ == '__main__':
-    from icecream import ic
+def write_csv_train_strat_in_col(
+        train_strategies: Tuple[str, ...] = ('vanilla', 'implicit'), chore_config: ChoreConfig = cconfig
+):
+    """
+    On only the Bert models & GPT2, random sampling
+    """
+    dom2dnms = chore_config('domain2dataset-names-all')
+    dnms_in, dnms_out = dom2dnms['in'], dom2dnms['out']
+    train_strategies = list(train_strategies)
+    header_in = sum([[f'in/{dnm}'] * len(train_strategies) for dnm in dnms_in], start=[])
+    header_out = sum([[f'out/{dnm}'] * len(train_strategies) for dnm in dnms_out], start=[])
+    rows: List[List] = [  # header
+        ['domain/dataset name'] + header_in + header_out,
+        ['training strategy\\\nmodel'] + train_strategies * (len(dnms_in) + len(dnms_out))
+    ]
+    setups = [
+        ('binary-bert', 'rand'),
+        # ('bert-nli', 'rand'),
+        ('bi-encoder', 'rand'),
+        ('gpt2-nvidia', 'NA'),
+    ]
+    for model_name, samp_strat in setups:
+        col_name = prettier_setup(model_name, samp_strat, chore_config=chore_config)
+        row = [col_name]
+        for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
+            for dnm in dnms:
+                for train_strat in train_strategies:
+                    if model_name == 'gpt2-nvidia' and train_strat != 'implicit-on-text-encode-sep':  # TODO: not ready yet
+                        acc = None
+                    else:
+                        dnm2csv_path = get_dnm2csv_path_fn(
+                            model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
+                        )
+                        acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                        acc = f'{acc * 100:4.1f}' if bool(acc) else None
+                    row.append(acc)
+        rows.append(row)
 
+    fnm = f'Model classification accuracy by dataset & training strategy, {now(for_path=True)}.csv'
+    fnm = os.path.join(get_chore_base(), 'table', fnm)
+    with open(fnm, 'w') as f:
+        writer = csv.writer(f)
+        for r in rows:
+            writer.writerow(r)
+
+
+def write_csv_train_strat_in_row(
+        train_strategies: Tuple[str, ...] = ('vanilla', 'implicit'), chore_config: ChoreConfig = cconfig,
+        domain: str = 'in'
+):
+    dom2dnms = chore_config('domain2dataset-names-all')
+    dnms = dom2dnms[domain]
+    train_strategies = list(train_strategies)
+    rows: List[List] = [  # header
+        ['architecture', 'training strategy\\dataset name'] + dnms + ['avg']
+    ]
+    setups = [
+        ('binary-bert', 'rand'),
+        ('bi-encoder', 'rand'),
+        ('gpt2-nvidia', 'NA'),
+    ]
+    for model_name, samp_strat in setups:
+        for train_strat in train_strategies:
+            col_name = prettier_setup(model_name, samp_strat, chore_config=chore_config)
+            row = [col_name, train_strat]
+            accs = []
+            for dnm in dnms:
+                if model_name == 'gpt2-nvidia' and train_strat != 'implicit-on-text-encode-sep':  # TODO: not ready yet
+                    acc = None
+                else:
+                    dnm2csv_path = get_dnm2csv_path_fn(
+                        model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
+                    )
+                    acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                    accs.append(acc)
+                    acc = f'{acc * 100:4.1f}' if bool(acc) else None
+                row.append(acc)
+            if accs:
+                row.append(f'{sum(accs) / len(accs) * 100:4.1f}')
+            else:
+                row.append(None)
+            rows.append(row)
+    domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+    fnm = f'{now(for_path=True)}_{domain_str.capitalize()} classification accuracy by dataset & training strategy.csv'
+    fnm = os.path.join(get_chore_base(), 'table', fnm)
+    with open(fnm, 'w') as f:
+        writer = csv.writer(f)
+        for r in rows:
+            writer.writerow(r)
+
+
+if __name__ == '__main__':
     # def quick_table(dataset_names, model_name, strategy):
     #     fn = get_dnm2csv_path_fn(model_name, strategy)
     #     summaries = dataset_acc(dataset_names, dnm2csv_path=fn)
@@ -130,51 +223,18 @@ if __name__ == '__main__':
     # write_csv(training_strategy='implicit')
     # write_csv_model_setup_by_dataset(training_strategy='all')
 
-    def write_csv_model_by_dataset_setup(train_strategies: Tuple[str, ...] = ('vanilla', 'implicit')):
-        """
-        On only the Bert models & GPT2, random sampling
-        """
-        dom2dnms = cconfig('domain2dataset-names-all')  # include deprecated `arxiv`
-        dnms_in, dnms_out = dom2dnms['in'], dom2dnms['out']
-        train_strategies = list(train_strategies)
-        header_in = sum([[f'in/{dnm}'] * len(train_strategies) for dnm in dnms_in], start=[])
-        header_out = sum([[f'out/{dnm}'] * len(train_strategies) for dnm in dnms_out], start=[])
-        rows: List[List] = [  # header
-            ['domain/dataset name'] + header_in + header_out,
-            ['training strategy\\\nmodel'] + train_strategies * (len(dnms_in) + len(dnms_out))
-        ]
-        setups = [
-            ('binary-bert', 'rand'),
-            ('bert-nli', 'rand'),
-            ('bi-encoder', 'rand'),
-            ('gpt2-nvidia', 'NA'),
-        ]
-        for model_name, samp_strat in setups:
-            col_name = prettier_setup(model_name, samp_strat)
-            row = [col_name]
-            for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
-                for dnm in dnms:
-                    for train_strat in train_strategies:
-                        if model_name == 'gpt2-nvidia' and train_strat == 'implicit':  # no implicit for GPT2
-                            acc = None
-                        elif 'on-text' in train_strat and model_name != 'binary-bert':  # other models not trained yet
-                            acc = None
-                        else:
-                            dnm2csv_path = get_dnm2csv_path_fn(model_name, samp_strat, train_strat, domain=domain)
-                            acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
-                            acc = f'{acc * 100:4.1f}' if bool(acc) else None
-                        row.append(acc)
-            rows.append(row)
 
-        fnm = f'Model classification accuracy by dataset & training strategy, {now(for_path=True)}.csv'
-        fnm = os.path.join(get_chore_base(), 'table', fnm)
-        with open(fnm, 'w') as f:
-            writer = csv.writer(f)
-            for r in rows:
-                writer.writerow(r)
-    tr_starts = (
-        'vanilla', 'implicit',
-        'implicit-on-text-encode-aspect',
-        'implicit-on-text-encode-sep',
-    )
-    write_csv_model_by_dataset_setup(train_strategies=tr_starts)
+    def write():
+        ttrial = 'asp-norm'
+        chore_config = ChoreConfig(train_trial=ttrial)
+        tr_strats = (
+            'vanilla',
+            # 'implicit',
+            # 'implicit-on-text-encode-aspect',
+            'implicit-on-text-encode-sep',
+            'explicit'
+        )
+        # dom = 'in'
+        dom = 'out'
+        write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom)
+    write()

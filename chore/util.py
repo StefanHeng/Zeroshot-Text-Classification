@@ -13,15 +13,75 @@ __all__ = ['get_chore_base', 'ChoreConfig', 'cconfig', 'get_dnm2csv_path_fn', 'p
 
 
 def get_chore_base() -> str:
-    return os.path.join(BASE_PATH, PROJ_DIR, 'chore')
+    return os.path.join(BASE_PATH, PROJ_DIR)
 
 
 class ChoreConfig:
-    def __init__(self):
+    def __init__(
+            self, shuffle: bool = 'new', lower_5ep_sanity_check: bool = True, explicit_version: int = 2,
+            train_trial: str = 'default', with_arxiv: bool = False
+    ):
+        ca.check_mismatch('Shuffle Strategy', shuffle, ['ori', 'new'])
+        ca.check_mismatch('Explicit Training Version', explicit_version, [1, 2])
+        # on all data, on intent-only data, on data of equal aspect #sample size
+        ca.check_mismatch('Train Trial', train_trial, ['default', 'intent-only', 'asp-norm'])
+
+        if explicit_version == 1:
+            rand_explicit_in = ['binary-bert', 'rand, explicit v2', 'in-domain, 05.25.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit v2', 'out-of-domain, 05.25.22']
+        else:  # v1
+            rand_explicit_in = ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22']
+
+        rand_vanilla_in = [
+            'binary-bert', 'rand, vanilla', 'in-domain, 05.03.22' if lower_5ep_sanity_check else 'in-domain, 03.24.22'
+        ]
+        rand_vanilla_out = [
+            'binary-bert', 'rand, vanilla',
+            'out-of-domain, 05.03.22' if lower_5ep_sanity_check else 'out-of-domain, 04.06.22'
+        ]
+        rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22']
+        rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22']
+        be_rand_vanilla_in = ['bi-encoder', 'rand, vanilla', 'in-domain, 03.26.22']
+        be_rand_vanilla_out = ['bi-encoder', 'rand, vanilla', 'out-of-domain, 04.06.22']
+        be_rand_implicit_sep_in, be_rand_implicit_sep_out = None, None
+        be_rand_explicit_in, be_rand_explicit_out = None, None
+        gp_vanilla_in = ['gpt2-nvidia', 'vanilla', 'in-domain, 2022-04-06_23-13-55']
+        gp_vanilla_out = ['gpt2-nvidia', 'vanilla', 'out-of-domain, 2022-04-06_23-43-19']
+        gp_implicit_sep_in, gp_implicit_sep_out = None, None
+        gp_explicit_in, gp_explicit_out = None, None
+        if train_trial == 'intent-only':
+            rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
+            rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
+        if train_trial == 'asp-norm':
+            assert explicit_version == 2
+            rand_vanilla_in = ['binary-bert', 'rand, vanilla, asp-norm', 'in-domain, 06.04.22']
+            rand_vanilla_out = ['binary-bert', 'rand, vanilla, asp-norm', 'out-of-domain, 06.04.22']
+            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, asp-norm', 'in-domain, 06.04.22']
+            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.04.22']
+            rand_explicit_in = ['binary-bert', 'rand, explicit, asp-norm', 'in-domain, 06.06.22']
+            rand_explicit_out = ['binary-bert', 'rand, explicit, asp-norm', 'out-of-domain, 06.06.22']
+
+            be_rand_vanilla_in = ['bi-encoder', 'rand, vanilla, asp-norm', 'in-domain, 06.09.22']
+            be_rand_vanilla_out = ['bi-encoder', 'rand, vanilla, asp-norm', 'out-of-domain, 06.09.22']
+            be_rand_implicit_sep_in = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'in-domain, 06.10.22']
+            be_rand_implicit_sep_out = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.10.22']
+            be_rand_explicit_in = ['bi-encoder', 'rand, explicit, asp-norm', 'in-domain, 06.10.22']
+            be_rand_explicit_out = ['bi-encoder', 'rand, explicit, asp-norm', 'out-of-domain, 06.10.22']
+            # TODO: add implicit, explicit
+            # be_rand_implicit_sep_in = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'in-domain, 06.09.22']
+            # be_rand_implicit_sep_out = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.09.22']
+
+            # gp_vanilla_in = ['gpt2-nvidia', 'vanilla, asp-norm', 'in-domain, 06.09.22']
+            # gp_vanilla_out = ['gpt2-nvidia', 'vanilla, asp-norm', 'out-of-domain, 06.09.22']
+            gp_implicit_sep_in = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'in-domain, 06.09.22']
+            gp_implicit_sep_out = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'out-of-domain, 06.09.22']
         d_dset_names = {
             'in': OrderedDict([
-                ('sentiment', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
-                ('intent', ['sgd', 'clinc_150', 'slurp']),
+                ('sentiment', ['emotion', 'go_emotion', 'sentiment_tweets_2020']),
+                ('intent', ['clinc_150', 'sgd', 'slurp']),
                 ('topic', ['ag_news', 'dbpedia', 'yahoo'])
             ]),
             'out': OrderedDict([
@@ -31,49 +91,9 @@ class ChoreConfig:
             ])
         }
         d_dset_names_all = deepcopy(d_dset_names)
-        # shuffle = 'ori'
-        shuffle = 'new'
-        sanity_check = True
-        explicit_v2 = True
-        # train_trial = 'default'
-        # train_trial = 'intent-only'
-        train_trial = 'asp-norm'
-        intent_only = False
-        # intent_only = True
-        if explicit_v2:
-            rand_explicit_in = ['binary-bert', 'rand, explicit v2', 'in-domain, 05.25.22']
-            rand_explicit_out = ['binary-bert', 'rand, explicit v2', 'out-of-domain, 05.25.22']
-        else:
-            rand_explicit_in = ['binary-bert', 'rand, explicit', 'in-domain, 05.13.22']
-            rand_explicit_out = ['binary-bert', 'rand, explicit', 'out-of-domain, 05.13.22']
-
-        if train_trial == 'default':
-            rand_vanilla_in = [
-                'binary-bert', 'rand, vanilla', 'in-domain, 05.03.22' if sanity_check else 'in-domain, 03.24.22'
-            ]
-            rand_vanilla_out = [
-                'binary-bert', 'rand, vanilla', 'out-of-domain, 05.03.22' if sanity_check else 'out-of-domain, 04.06.22'
-            ]
-            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep', 'in-domain, 04.21.22']
-            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep', 'out-of-domain, 04.21.22']
-        elif train_trial == 'intent-only':
-            rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
-            rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
-            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
-            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
-        else:
-            assert train_trial == 'asp-norm'
-            rand_vanilla_in = ['binary-bert', 'rand, vanilla, asp-norm', 'in-domain, 06.04.22']
-            rand_vanilla_out = ['binary-bert', 'rand, vanilla, asp-norm', 'out-of-domain, 06.04.22']
-            rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, asp-norm', 'in-domain, 06.04.22']
-            rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.04.22']
-
-            assert explicit_v2
-            rand_explicit_in = ['binary-bert', 'rand, explicit, asp-norm', 'in-domain, 06.06.22']
-            rand_explicit_out = ['binary-bert', 'rand, explicit, asp-norm', 'out-of-domain, 06.06.22']
-            # TODO: add explicit
         # intended for writing out table, will write all the data
-        d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
+        if with_arxiv:
+            d_dset_names_all['out']['topic'].insert(0, 'arxiv')  # the only difference
         self.config_dict = {
             'domain2aspect2dataset-names': d_dset_names,
             'domain2aspect2dataset-names-all': d_dset_names_all,
@@ -129,13 +149,16 @@ class ChoreConfig:
                 ('bert-nli', 'vect', 'vanilla', 'in', '3ep'): ['bert-nli', 'vect, vanilla', 'in-domain, 03.05.22'],
                 ('bert-nli', 'vect', 'vanilla', 'out', '3ep'): ['bert-nli', 'vect, vanilla', 'out-of-domain, 03.09.22'],
 
-                ('bi-encoder', 'rand', 'vanilla', 'in', '3ep'): ['bi-encoder', 'rand, vanilla', 'in-domain, 03.26.22'],
-                ('bi-encoder', 'rand', 'vanilla', 'out', '3ep'):
-                    ['bi-encoder', 'rand, vanilla', 'out-of-domain, 04.06.22'],
+                ('bi-encoder', 'rand', 'vanilla', 'in', '3ep'): be_rand_vanilla_in,
+                ('bi-encoder', 'rand', 'vanilla', 'out', '3ep'): be_rand_vanilla_out,
                 ('bi-encoder', 'rand', 'implicit', 'in', '3ep'):
                     ['bi-encoder', 'rand, implicit', 'in-domain, 04.09.22'],
                 ('bi-encoder', 'rand', 'implicit', 'out', '3ep'): [
                     'bi-encoder', 'rand, implicit', 'out-of-domain, 04.11.22'],
+                ('bi-encoder', 'rand', 'implicit-on-text-encode-sep', 'in', '3ep'): be_rand_implicit_sep_in,
+                ('bi-encoder', 'rand', 'implicit-on-text-encode-sep', 'out', '3ep'): be_rand_implicit_sep_out,
+                ('bi-encoder', 'rand', 'explicit', 'in', '3ep'): be_rand_explicit_in,
+                ('bi-encoder', 'rand', 'explicit', 'out', '3ep'): be_rand_explicit_out,
                 ('bi-encoder', 'vect', 'vanilla', 'in', '3ep'): ['bi-encoder', 'vect, vanilla', 'in-domain, 03.07.22'],
 
                 ('dual-bi-encoder', 'none', 'vanilla', 'in', '3ep'): [
@@ -143,10 +166,12 @@ class ChoreConfig:
                 ('dual-bi-encoder', 'none', 'vanilla', 'out', '3ep'): [
                     'dual-bi-encoder', 'none, vanilla', 'out-of-domain, 03.23.22'],
 
-                ('gpt2-nvidia', 'NA', 'vanilla', 'in', '3ep'): [
-                    'gpt2-nvidia', 'NA, vanilla', 'in-domain, 2022-04-06_23-13-55'],
-                ('gpt2-nvidia', 'NA', 'vanilla', 'out', '3ep'): [
-                    'gpt2-nvidia', 'NA, vanilla', 'out-of-domain, 2022-04-06_23-43-19']
+                ('gpt2-nvidia', 'NA', 'vanilla', 'in', '3ep'): gp_vanilla_in,
+                ('gpt2-nvidia', 'NA', 'vanilla', 'out', '3ep'): gp_vanilla_out,
+                ('gpt2-nvidia', 'NA', 'implicit-on-text-encode-sep', 'in', '3ep'): gp_implicit_sep_in,
+                ('gpt2-nvidia', 'NA', 'implicit-on-text-encode-sep', 'out', '3ep'): gp_implicit_sep_out,
+                ('gpt2-nvidia', 'NA', 'explicit', 'in', '3ep'): gp_explicit_in,
+                ('gpt2-nvidia', 'NA', 'explicit', 'out', '3ep'): gp_explicit_out
             }),
             'pretty': {
                 'model-name': {
@@ -184,7 +209,7 @@ cconfig = ChoreConfig()
 
 def get_dnm2csv_path_fn(
         model_name: str, sampling_strategy: str = 'rand', training_strategy: str = 'vanilla',
-        domain: str = 'in', train_description: str = '3ep'
+        domain: str = 'in', train_description: str = '3ep', chore_config: ChoreConfig = cconfig
 ) -> Callable:
     ca(
         model_name=model_name, dataset_domain=domain,
@@ -192,22 +217,22 @@ def get_dnm2csv_path_fn(
     )
     paths = [BASE_PATH, PROJ_DIR, 'eval']
     key = model_name, sampling_strategy, training_strategy, domain, train_description
-    paths += cconfig('train-setup2dset-eval-path')[key]
+    paths += chore_config('train-setup2dset-eval-path')[key]
     return lambda d_nm: os.path.join(*paths, f'{d_nm}.csv')
 
 
 def prettier_setup(
         model_name: str, sampling_strategy: str = None, training_strategy: str = None, pprint=True,
-        newline: bool = False
+        newline: bool = False, chore_config: ChoreConfig = cconfig
 ) -> Union[Tuple[str, str], str]:
     ca(model_name=model_name)
     if sampling_strategy:
         ca(sampling_strategy=sampling_strategy)
     if training_strategy:
         ca(training_strategy=training_strategy)
-    md_nm = cconfig('pretty.model-name')[model_name]
-    samp_strat = cconfig('pretty.sampling-strategy')[sampling_strategy] if sampling_strategy else None
-    train_strat = cconfig('pretty.training-strategy')[training_strategy] if training_strategy else None
+    md_nm = chore_config('pretty.model-name')[model_name]
+    samp_strat = chore_config('pretty.sampling-strategy')[sampling_strategy] if sampling_strategy else None
+    train_strat = chore_config('pretty.training-strategy')[training_strategy] if training_strategy else None
     if pprint:
         ret = md_nm
         if newline:
