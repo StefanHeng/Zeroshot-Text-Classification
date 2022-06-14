@@ -70,14 +70,13 @@ class ChoreConfig:
             be_rand_implicit_sep_out = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.10.22']
             be_rand_explicit_in = ['bi-encoder', 'rand, explicit, asp-norm', 'in-domain, 06.10.22']
             be_rand_explicit_out = ['bi-encoder', 'rand, explicit, asp-norm', 'out-of-domain, 06.10.22']
-            # TODO: add implicit, explicit
-            # be_rand_implicit_sep_in = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'in-domain, 06.09.22']
-            # be_rand_implicit_sep_out = ['bi-encoder', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.09.22']
 
-            # gp_vanilla_in = ['gpt2-nvidia', 'vanilla, asp-norm', 'in-domain, 06.09.22']
-            # gp_vanilla_out = ['gpt2-nvidia', 'vanilla, asp-norm', 'out-of-domain, 06.09.22']
-            gp_implicit_sep_in = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'in-domain, 06.09.22']
-            gp_implicit_sep_out = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'out-of-domain, 06.09.22']
+            gp_vanilla_in = ['gpt2-nvidia', 'vanilla, asp-norm', 'in-domain, 06.10.22']
+            gp_vanilla_out = ['gpt2-nvidia', 'vanilla, asp-norm', 'out-of-domain, 06.10.22']
+            gp_implicit_sep_in = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'in-domain, 06.13.22']
+            gp_implicit_sep_out = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'out-of-domain, 06.13.22']
+            gp_explicit_in = ['gpt2-nvidia', 'explicit, asp-norm', 'in-domain, 06.14.22']
+            gp_explicit_out = ['gpt2-nvidia', 'explicit, asp-norm', 'out-of-domain, 06.14.22']
         d_dset_names = {
             'in': OrderedDict([
                 ('sentiment', ['emotion', 'go_emotion', 'sentiment_tweets_2020']),
@@ -171,7 +170,10 @@ class ChoreConfig:
                 ('gpt2-nvidia', 'NA', 'implicit-on-text-encode-sep', 'in', '3ep'): gp_implicit_sep_in,
                 ('gpt2-nvidia', 'NA', 'implicit-on-text-encode-sep', 'out', '3ep'): gp_implicit_sep_out,
                 ('gpt2-nvidia', 'NA', 'explicit', 'in', '3ep'): gp_explicit_in,
-                ('gpt2-nvidia', 'NA', 'explicit', 'out', '3ep'): gp_explicit_out
+                ('gpt2-nvidia', 'NA', 'explicit', 'out', '3ep'): gp_explicit_out,
+
+                ('bert-seq-cls', 'NA', 'vanilla', 'in', '3ep'): ['bert-seq-cls', 'vanilla', 'in-domain, 06.13.22'],
+                ('bert-seq-cls', 'NA', 'vanilla', 'out', '3ep'):  ['bert-seq-cls', 'vanilla', 'out-of-domain, 06.14.22']
             }),
             'pretty': {
                 'model-name': {

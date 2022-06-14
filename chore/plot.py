@@ -260,7 +260,7 @@ if __name__ == '__main__':
             setups = [dict(zip(keys, s)) for s in _setups]
         else:
             _setups = [
-                # (md_nm, tr_strat, 'vanilla'),
+                (md_nm, tr_strat, 'vanilla'),
                 # (md_nm, tr_strat, 'implicit'),
                 # (md_nm, tr_strat, 'implicit-on-text-encode-aspect'),
                 (md_nm, tr_strat, 'implicit-on-text-encode-sep'),
@@ -281,7 +281,7 @@ if __name__ == '__main__':
             setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
             ylim=(0, 100), title=title, chore_config=chore_config
         )
-    # plot_one_model(domain='in')
+    plot_one_model(domain='in')
     plot_one_model(domain='out')
 
     def plot_intent_only(domain: str = 'in'):

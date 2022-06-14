@@ -1,12 +1,14 @@
+import math
 import os
 import datetime
 import configparser
 from os.path import join as os_join
-from typing import List, Tuple, Dict, Iterable
+from typing import List, Tuple, Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
 import sklearn
+from datasets import load_metric
 import matplotlib.pyplot as plt
 
 from stefutil import *
@@ -15,7 +17,8 @@ from zeroshot_classifier.util.data_path import BASE_PATH, PROJ_DIR, DSET_DIR, PK
 
 __all__ = [
     'sconfig', 'u', 'save_fig', 'plot_points',
-    'map_model_output_path', 'domain2eval_dir_nm', 'get_dataset_names', 'TrainStrategy2PairMap', 'eval_res2df'
+    'map_model_dir_nm', 'map_model_output_path', 'domain2eval_dir_nm', 'TrainStrategy2PairMap',
+    'eval_res2df', 'compute_metrics'
 ]
 
 
@@ -46,21 +49,24 @@ def config_parser2dict(conf: configparser.ConfigParser) -> Dict:
 
 
 def map_model_dir_nm(
-        model_name: str = None, name: str = None, mode: str = 'vanilla', sampling: str = 'rand',
-        normalize_aspect: bool = False
+        model_name: str = None, name: str = None, mode: Optional[str] = 'vanilla',
+        sampling: Optional[str] = 'rand', normalize_aspect: bool = False
 ) -> str:
     out = f'{now(for_path=True)}_{model_name}'
     if name:
         out = f'{out}-{name}'
-    out = f'{out}-{mode}-{sampling}'
+    if mode:
+        out = f'{out}-{mode}'
+    if sampling:
+        out = f'{out}-{sampling}'
     if normalize_aspect:
         out = f'{out}-aspect-norm'
     return out
 
 
 def map_model_output_path(
-        model_name: str = None, output_path: str = None, mode: str = 'vanilla', sampling: str = 'rand',
-        normalize_aspect: bool = False
+        model_name: str = None, output_path: str = None, mode: Optional[str] = 'vanilla',
+        sampling: Optional[str] = 'rand', normalize_aspect: bool = False
 ) -> str:
     def _map(dir_nm):
         return map_model_dir_nm(model_name, dir_nm, mode, sampling, normalize_aspect)
@@ -77,10 +83,6 @@ def domain2eval_dir_nm(domain: str = 'in'):
     date = datetime.datetime.now().strftime('%m.%d.%Y')
     date = date[:-4] + date[-2:]  # 2-digit year
     return f'{domain_str}, {date}'
-
-
-def get_dataset_names(domain: str = 'in'):
-    return [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
 
 
 class TrainStrategy2PairMap:
@@ -120,9 +122,23 @@ class TrainStrategy2PairMap:
             return text
 
 
-def eval_res2df(labels: Iterable, preds: Iterable, **kwargs) -> Tuple[pd.DataFrame, float]:
-    report = sklearn.metrics.classification_report(labels, preds, **kwargs)
-    return pd.DataFrame(report).transpose(), round(report["accuracy"], 3)
+def eval_res2df(labels: Iterable, preds: Iterable, report_args: Dict = None) -> Tuple[pd.DataFrame, float]:
+    report = sklearn.metrics.classification_report(labels, preds, **(report_args or dict()))
+    if 'accuracy' in report:
+        acc = report['accuracy']
+    else:
+        vals = [v for k, v in report['micro avg'].items() if k != 'support']
+        assert all(math.isclose(v, vals[0], abs_tol=1e-8) for v in vals)
+        acc = vals[0]
+    return pd.DataFrame(report).transpose(), round(acc, 3)
+
+
+def compute_metrics(eval_pred):
+    if not hasattr(compute_metrics, 'acc'):
+        compute_metrics.acc = load_metric('accuracy')
+    logits, labels = eval_pred
+    preds = np.argmax(logits, axis=-1)
+    return dict(acc=compute_metrics.acc.compute(predictions=preds, references=labels)['accuracy'])
 
 
 if __name__ == '__main__':

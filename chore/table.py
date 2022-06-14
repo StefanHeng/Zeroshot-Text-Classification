@@ -237,4 +237,16 @@ if __name__ == '__main__':
         # dom = 'in'
         dom = 'out'
         write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom)
-    write()
+    # write()
+
+    def get_seq_cls_numbers(domain: str = 'in'):
+        md_nm = 'bert-seq-cls'
+        dnms = cconfig(f'domain2dataset-names-all.{domain}')
+        samp_strat, train_strat = 'NA', 'vanilla'
+        dnm2csv_path = get_dnm2csv_path_fn(md_nm, samp_strat, train_strat, domain=domain, chore_config=cconfig)
+        for dnm in dnms:
+            acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path)
+            mic(dnm, acc)
+            exit(1)
+    get_seq_cls_numbers()
+

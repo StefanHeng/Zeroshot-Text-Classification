@@ -10,10 +10,8 @@ Pretrained weights loaded for finetuning
 
 from os.path import join as os_join
 
-import numpy as np
 from transformers import TrainingArguments, SchedulerType
 from transformers.training_args import OptimizerNames
-from datasets import load_metric
 
 from stefutil import *
 from zeroshot_classifier.util import *
@@ -21,16 +19,16 @@ import zeroshot_classifier.util.utcd as utcd_util
 import zeroshot_classifier.models.binary_bert
 
 
-__all__ = ['EXPLICIT_BERT_MODEL_NAME', 'EXPLICIT_GPT2_MODEL_NAME', 'get_train_args', 'compute_metrics']
+__all__ = ['EXPLICIT_BERT_MODEL_NAME', 'EXPLICIT_GPT2_MODEL_NAME', 'get_train_args']
 
 
-_bert_md_nm = zeroshot_classifier.models.binary_bert.MODEL_NAME,
+_bert_md_nm = zeroshot_classifier.models.binary_bert.MODEL_NAME
 _gpt2_md_nm = zeroshot_classifier.models.gpt2.MODEL_NAME
 EXPLICIT_BERT_MODEL_NAME = f'Explicit Pretrain Aspect {_bert_md_nm}'
 EXPLICIT_GPT2_MODEL_NAME = f'Explicit Pretrain Aspect {_gpt2_md_nm}'
 
 
-def get_train_args(model_name: str, **kwargs) -> TrainingArguments:
+def get_train_args(model_name: str, dir_name: str = None, **kwargs) -> TrainingArguments:
     ca.check_mismatch('Model Name', model_name, [_bert_md_nm, _gpt2_md_nm])
     debug = False
     if debug:
@@ -56,7 +54,7 @@ def get_train_args(model_name: str, **kwargs) -> TrainingArguments:
         args['per_device_train_batch_size'] = bsz
         args['per_device_eval_batch_size'] = bsz
     md_nm = model_name.replace(' ', '-')
-    dir_nm = f'{now(for_path=True)}_{md_nm}'
+    dir_nm = dir_name or f'{now(for_path=True)}_{md_nm}'
     args.update(dict(
         output_dir=os_join(utcd_util.get_output_base(), u.proj_dir, u.model_dir, dir_nm),
         do_train=True, do_eval=True,
@@ -72,11 +70,3 @@ def get_train_args(model_name: str, **kwargs) -> TrainingArguments:
     ))
     args.update(kwargs)
     return TrainingArguments(**args)
-
-
-def compute_metrics(eval_pred):
-    if not hasattr(compute_metrics, 'acc'):
-        compute_metrics.acc = load_metric('accuracy')
-    logits, labels = eval_pred
-    preds = np.argmax(logits, axis=-1)
-    return dict(acc=compute_metrics.acc.compute(predictions=preds, references=labels)['accuracy'])

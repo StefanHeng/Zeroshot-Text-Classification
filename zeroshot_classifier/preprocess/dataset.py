@@ -19,9 +19,10 @@ def get_dataset(
         map_func: Union[Dict[str, Callable], Callable] = None, filter_func: Callable = None,
         remove_columns: Union[str, List[str]] = None,
         n_sample: int = None, shuffle_seed: int = None, fast=True, from_disk=True,
-        splits: Union[str, List[str], Tuple[str]] = ('train', 'test')
+        splits: Union[str, List[str], Tuple[str]] = ('train', 'test'), pbar: bool = False
 ) -> List[Dataset]:
     logger = get_logger('Get Dataset')
+    logger.info(f'Loading dataset {logi(dataset_name)}... ')
     if from_disk:
         path = os.path.join(utcd_util.get_output_base(), u.proj_dir, u.dset_dir, 'processed', dataset_name)
         dsets = datasets.load_from_disk(path)
@@ -45,17 +46,22 @@ def get_dataset(
     dsets = [dsets[s] for s in splits]
     num_proc = None
     n_cpu = os.cpu_count()
-    if fast and n_cpu >= 2:
+    if fast and n_cpu >= 2 and min(len(d) for d in dsets) > 4096:
         num_proc = n_cpu
-        datasets.set_progress_bar_enabled(False)
+        if not pbar:
+            datasets.set_progress_bar_enabled(False)
     # ordering of filter, shuffle, then select determined for debugging
     if filter_func is not None:
+        logger.info('Filtering...')
         dsets = [dset.filter(filter_func, num_proc=num_proc) for dset in dsets]
     if shuffle_seed:
+        logger.info(f'Shuffling with seed {logi(shuffle_seed)}...')
         dsets = [dset.shuffle(seed=shuffle_seed) for dset in dsets]
     if n_sample is not None:
+        logger.info(f'Selecting the first {logi(n_sample)} samples...')
         dsets = [d.select(range(min(n_sample, len(d)))) for d in dsets]
     if map_func is not None:
+        logger.info('Mapping...')
         if not isinstance(map_func, dict):
             map_func = {s: map_func for s in splits}
         dsets = [
