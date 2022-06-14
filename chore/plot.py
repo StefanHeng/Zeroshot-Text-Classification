@@ -264,7 +264,7 @@ if __name__ == '__main__':
                 # (md_nm, tr_strat, 'implicit'),
                 # (md_nm, tr_strat, 'implicit-on-text-encode-aspect'),
                 (md_nm, tr_strat, 'implicit-on-text-encode-sep'),
-                # (md_nm, tr_strat, 'explicit')
+                (md_nm, tr_strat, 'explicit')
             ]
             setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
         # ic(setups)
@@ -278,7 +278,7 @@ if __name__ == '__main__':
         if ttrial:
             title = f'Aspect-Normalized {title}'
         plot_setups_acc(
-            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
             ylim=(0, 100), title=title, chore_config=chore_config
         )
     plot_one_model(domain='in')

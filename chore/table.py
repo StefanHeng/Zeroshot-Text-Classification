@@ -48,14 +48,11 @@ def write_csv_train_strat_in_col(
         for domain, dnms in zip(['in', 'out'], [dnms_in, dnms_out]):
             for dnm in dnms:
                 for train_strat in train_strategies:
-                    if model_name == 'gpt2-nvidia' and train_strat != 'implicit-on-text-encode-sep':  # TODO: not ready yet
-                        acc = None
-                    else:
-                        dnm2csv_path = get_dnm2csv_path_fn(
-                            model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
-                        )
-                        acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
-                        acc = f'{acc * 100:4.1f}' if bool(acc) else None
+                    dnm2csv_path = get_dnm2csv_path_fn(
+                        model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
+                    )
+                    acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                    acc = f'{acc * 100:4.1f}' if bool(acc) else None
                     row.append(acc)
         rows.append(row)
 
@@ -88,15 +85,12 @@ def write_csv_train_strat_in_row(
             row = [col_name, train_strat]
             accs = []
             for dnm in dnms:
-                if model_name == 'gpt2-nvidia' and train_strat != 'implicit-on-text-encode-sep':  # TODO: not ready yet
-                    acc = None
-                else:
-                    dnm2csv_path = get_dnm2csv_path_fn(
-                        model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
-                    )
-                    acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
-                    accs.append(acc)
-                    acc = f'{acc * 100:4.1f}' if bool(acc) else None
+                dnm2csv_path = get_dnm2csv_path_fn(
+                    model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
+                )
+                acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                accs.append(acc)
+                acc = f'{acc * 100:4.1f}' if (bool(acc) or acc == 0) else None
                 row.append(acc)
             if accs:
                 row.append(f'{sum(accs) / len(accs) * 100:4.1f}')
@@ -237,16 +231,29 @@ if __name__ == '__main__':
         # dom = 'in'
         dom = 'out'
         write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom)
-    # write()
+    write()
 
-    def get_seq_cls_numbers(domain: str = 'in'):
+    def get_one_model_numbers(domain: str = 'in'):
+        def prettier_acc(a: float) -> str:
+            return f'{a * 100:4.1f}' if bool(a) else None
+
         md_nm = 'bert-seq-cls'
+        if md_nm == 'bert-seq-cls':
+            samp_strat, train_strat = 'NA', 'vanilla'
+        elif md_nm == 'gpt2-nvidia':
+            samp_strat = 'NA'
+            train_strat = 'implicit'
+        else:
+            raise NotImplementedError(f'{md_nm}')
+        mic(md_nm, domain)
         dnms = cconfig(f'domain2dataset-names-all.{domain}')
-        samp_strat, train_strat = 'NA', 'vanilla'
         dnm2csv_path = get_dnm2csv_path_fn(md_nm, samp_strat, train_strat, domain=domain, chore_config=cconfig)
+        accs = []
         for dnm in dnms:
             acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path)
-            mic(dnm, acc)
-            exit(1)
-    get_seq_cls_numbers()
+            accs.append(acc)
+            mic(dnm, prettier_acc(acc))
+        avg = sum(accs) / len(accs)
+        mic('avg', prettier_acc(avg))
+    # get_one_model_numbers(domain='out')
 

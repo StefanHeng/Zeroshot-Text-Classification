@@ -1,4 +1,5 @@
 import os
+import math
 from copy import deepcopy
 from typing import Tuple, Dict, Iterable, Callable, Any, Union
 from collections import OrderedDict
@@ -272,7 +273,7 @@ def dataset_acc(
         df.support = df.support.astype(int)
         acc_row = df.iloc[0, :]  # The accuracy row
         acc = acc_row['f1-score']
-        assert acc_row.precision == acc_row.recall == acc
+        assert all(math.isclose(a, acc, abs_tol=1e-8) for a in (acc_row.precision, acc_row.recall))
         return acc
     if isinstance(dataset_names, str):
         return get_single(dataset_names)
