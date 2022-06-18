@@ -66,7 +66,7 @@ def write_csv_train_strat_in_col(
 
 def write_csv_train_strat_in_row(
         train_strategies: Tuple[str, ...] = ('vanilla', 'implicit'), chore_config: ChoreConfig = cconfig,
-        domain: str = 'in'
+        domain: str = 'in', pretty: bool = True
 ):
     dom2dnms = chore_config('domain2dataset-names-all')
     dnms = dom2dnms[domain]
@@ -88,12 +88,20 @@ def write_csv_train_strat_in_row(
                 dnm2csv_path = get_dnm2csv_path_fn(
                     model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
                 )
-                acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
+                acc: Union[float, None] = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
                 accs.append(acc)
-                acc = f'{acc * 100:4.1f}' if (bool(acc) or acc == 0) else None
+                if bool(acc) or acc == 0:
+                    acc *= 100
+                    if pretty:
+                        acc = round(acc, 1)
+                else:
+                    acc = None
                 row.append(acc)
             if accs:
-                row.append(f'{sum(accs) / len(accs) * 100:4.1f}')
+                acc = sum(accs) / len(accs) * 100
+                if pretty:
+                    acc = round(acc, 1)
+                row.append(acc)
             else:
                 row.append(None)
             rows.append(row)
@@ -127,12 +135,34 @@ if __name__ == '__main__':
     #         print_single(with_color=True)
     # # quick_table(config('UTCD.datasets'))
     #
-    # def get_latex_table_row():
-    #     for model_name, strategy in [('binary-bert', 'rand'), ('bert-nli', 'rand'), ('gpt2-nvidia', 'NA')]:
-    #         summaries = dataset_acc(IN_DATASET_NAMES, dnm2csv_path=get_dnm2csv_path_fn(model_name, strategy))
-    #         print(summaries2table_row(summaries, exp='csv'))
-    # # get_latex_table_row()
-    #
+    def get_latex_table_rows(domain: str = 'in'):
+        ttrial = 'asp-norm'
+        chore_config = ChoreConfig(train_trial=ttrial)
+        dnms = chore_config(f'domain2dataset-names.{domain}')
+        mic(dnms)
+
+        def get_single(model_name, sampling_strategy, training_strategy):
+            path_fn = get_dnm2csv_path_fn(
+                model_name=model_name, sampling_strategy=sampling_strategy, training_strategy=training_strategy,
+                domain=domain, chore_config=chore_config
+            )
+            summaries = dataset_acc(dnms, dnm2csv_path=path_fn)
+            accs = []
+            for dnm in dnms:
+                acc = summaries[dnm] * 100
+                accs.append(acc)
+
+            avg = round(sum(accs) / len(accs), 1)
+            accs = ' '.join([f'{log_s("&", c="m")} {logi(round(a, 1))}' for a in accs])
+            return f'{model_name} & {training_strategy} {accs} & {logi(avg)} \\\\'
+
+        print(get_single('bert-seq-cls', 'NA', 'vanilla'))
+        for md_nm in ['binary-bert', 'bi-encoder', 'gpt2-nvidia']:
+            samp_strat = 'NA' if 'gpt2' in md_nm else 'rand'
+            for strat in ['vanilla', 'implicit-on-text-encode-sep', 'explicit']:
+                print(get_single(md_nm, samp_strat, strat))
+    # get_latex_table_rows('out')
+
     # def get_csv(domain: str = 'in'):
     #     assert domain in ['in', 'out']
     #     dnms = IN_DATASET_NAMES if domain == 'in' else OUT_DATASET_NAMES
@@ -230,7 +260,7 @@ if __name__ == '__main__':
         )
         # dom = 'in'
         dom = 'out'
-        write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom)
+        write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom, pretty=False)
     write()
 
     def get_one_model_numbers(domain: str = 'in'):

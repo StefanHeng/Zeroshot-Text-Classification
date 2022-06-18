@@ -57,6 +57,8 @@ class ChoreConfig:
             rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
             rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
         if train_trial == 'asp-norm':
+            new_bin_bert = True
+
             assert explicit_version == 2
             rand_vanilla_in = ['binary-bert', 'rand, vanilla, asp-norm', 'in-domain, 06.04.22']
             rand_vanilla_out = ['binary-bert', 'rand, vanilla, asp-norm', 'out-of-domain, 06.04.22']
@@ -64,6 +66,13 @@ class ChoreConfig:
             rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.04.22']
             rand_explicit_in = ['binary-bert', 'rand, explicit, asp-norm', 'in-domain, 06.06.22']
             rand_explicit_out = ['binary-bert', 'rand, explicit, asp-norm', 'out-of-domain, 06.06.22']
+            if new_bin_bert:
+                rand_vanilla_in[-1] = 'in-domain, 06.15.22'
+                rand_vanilla_out[-1] = 'out-of-domain, 06.15.22'
+                rand_implicit_sep_in[-1] = 'in-domain, 06.15.22'
+                rand_implicit_sep_out[-1] = 'out-of-domain, 06.15.22'
+                rand_explicit_in[-1] = 'in-domain, 06.15.22'
+                rand_explicit_out[-1] = 'out-of-domain, 06.15.22'
 
             be_rand_vanilla_in = ['bi-encoder', 'rand, vanilla, asp-norm', 'in-domain, 06.09.22']
             be_rand_vanilla_out = ['bi-encoder', 'rand, vanilla, asp-norm', 'out-of-domain, 06.09.22']
@@ -80,8 +89,8 @@ class ChoreConfig:
             gp_explicit_out = ['gpt2-nvidia', 'explicit, asp-norm', 'out-of-domain, 06.14.22']
         d_dset_names = {
             'in': OrderedDict([
-                ('sentiment', ['emotion', 'go_emotion', 'sentiment_tweets_2020']),
-                ('intent', ['clinc_150', 'sgd', 'slurp']),
+                ('sentiment', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),
+                ('intent', ['sgd', 'clinc_150', 'slurp']),
                 ('topic', ['ag_news', 'dbpedia', 'yahoo'])
             ]),
             'out': OrderedDict([
