@@ -20,7 +20,7 @@ def get_chore_base() -> str:
 class ChoreConfig:
     def __init__(
             self, shuffle: bool = 'new', lower_5ep_sanity_check: bool = True, explicit_version: int = 2,
-            train_trial: str = 'default', with_arxiv: bool = False
+            train_trial: str = 'default', with_arxiv: bool = False, gpt2_embed_sim: bool = False
     ):
         ca.check_mismatch('Shuffle Strategy', shuffle, ['ori', 'new'])
         ca.check_mismatch('Explicit Training Version', explicit_version, [1, 2])
@@ -87,6 +87,14 @@ class ChoreConfig:
             gp_implicit_sep_out = ['gpt2-nvidia', 'implicit-sep, asp-norm', 'out-of-domain, 06.13.22']
             gp_explicit_in = ['gpt2-nvidia', 'explicit, asp-norm', 'in-domain, 06.14.22']
             gp_explicit_out = ['gpt2-nvidia', 'explicit, asp-norm', 'out-of-domain, 06.14.22']
+
+            if gpt2_embed_sim:
+                gp_vanilla_in = ['gpt2-nvidia', 'vanilla, asp-norm, emb-sim', 'in-domain, 06.21.22']
+                gp_vanilla_out = ['gpt2-nvidia', 'vanilla, asp-norm, emb-sim', 'out-of-domain, 06.21.22']
+                gp_implicit_sep_in = ['gpt2-nvidia', 'implicit, asp-norm, emb-sim', 'in-domain, 06.21.22']
+                gp_implicit_sep_out = ['gpt2-nvidia', 'implicit, asp-norm, emb-sim', 'out-of-domain, 06.21.22']
+                gp_explicit_in = ['gpt2-nvidia', 'explicit, asp-norm, emb-sim', 'in-domain, 06.21.22']
+                gp_explicit_out = ['gpt2-nvidia', 'explicit, asp-norm, emb-sim', 'out-of-domain, 06.21.22']
         d_dset_names = {
             'in': OrderedDict([
                 ('sentiment', ['go_emotion', 'sentiment_tweets_2020', 'emotion']),

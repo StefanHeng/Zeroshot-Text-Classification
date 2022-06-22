@@ -137,7 +137,7 @@ if __name__ == '__main__':
     #
     def get_latex_table_rows(domain: str = 'in'):
         ttrial = 'asp-norm'
-        chore_config = ChoreConfig(train_trial=ttrial)
+        chore_config = ChoreConfig(train_trial=ttrial, gpt2_embed_sim=True)
         dnms = chore_config(f'domain2dataset-names.{domain}')
         mic(dnms)
 
@@ -161,7 +161,8 @@ if __name__ == '__main__':
             samp_strat = 'NA' if 'gpt2' in md_nm else 'rand'
             for strat in ['vanilla', 'implicit-on-text-encode-sep', 'explicit']:
                 print(get_single(md_nm, samp_strat, strat))
-    # get_latex_table_rows('out')
+    # get_latex_table_rows('in')
+    get_latex_table_rows('out')
 
     # def get_csv(domain: str = 'in'):
     #     assert domain in ['in', 'out']
@@ -248,9 +249,12 @@ if __name__ == '__main__':
     # write_csv_model_setup_by_dataset(training_strategy='all')
 
 
-    def write():
+    def write(domain: str = 'in'):
         ttrial = 'asp-norm'
-        chore_config = ChoreConfig(train_trial=ttrial)
+        chore_config = ChoreConfig(
+            train_trial=ttrial,
+            # gpt2_embed_sim=True
+        )
         tr_strats = (
             'vanilla',
             # 'implicit',
@@ -258,10 +262,12 @@ if __name__ == '__main__':
             'implicit-on-text-encode-sep',
             'explicit'
         )
-        # dom = 'in'
-        dom = 'out'
-        write_csv_train_strat_in_row(train_strategies=tr_strats, chore_config=chore_config, domain=dom, pretty=False)
-    write()
+        write_csv_train_strat_in_row(
+            train_strategies=tr_strats, chore_config=chore_config, domain=domain,
+            pretty=False
+        )
+    # write('in')
+    # write('out')
 
     def get_one_model_numbers(domain: str = 'in'):
         def prettier_acc(a: float) -> str:

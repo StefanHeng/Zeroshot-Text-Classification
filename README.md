@@ -1,4 +1,4 @@
-# Zero-shot Bi-encoder 
+# Zero-shot Text Classification
 1. Benchmarking zero-shot text classification models
 2. Bi-encoder for zero-shot classification, a balance between speed & accuracy.
 
@@ -6,7 +6,7 @@
 
 
 ## Usage
-Python version `3.9.7`.
+Python version `3.8.10`.
 
 ```bash
 pip3 install -r requirements.txt
