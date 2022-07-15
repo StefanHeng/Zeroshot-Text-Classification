@@ -136,8 +136,9 @@ if __name__ == '__main__':
     # # quick_table(config('UTCD.datasets'))
     #
     def get_latex_table_rows(domain: str = 'in'):
+        # ttrial = 'default'
         ttrial = 'asp-norm'
-        chore_config = ChoreConfig(train_trial=ttrial, gpt2_embed_sim=True)
+        chore_config = ChoreConfig(train_trial=ttrial, gpt2_embed_sim=True, new_bert_eot=False)
         dnms = chore_config(f'domain2dataset-names.{domain}')
         mic(dnms)
 
@@ -162,7 +163,7 @@ if __name__ == '__main__':
             for strat in ['vanilla', 'implicit-on-text-encode-sep', 'explicit']:
                 print(get_single(md_nm, samp_strat, strat))
     # get_latex_table_rows('in')
-    get_latex_table_rows('out')
+    # get_latex_table_rows('out')
 
     # def get_csv(domain: str = 'in'):
     #     assert domain in ['in', 'out']
@@ -248,11 +249,11 @@ if __name__ == '__main__':
     # write_csv(training_strategy='implicit')
     # write_csv_model_setup_by_dataset(training_strategy='all')
 
-
     def write(domain: str = 'in'):
         ttrial = 'asp-norm'
         chore_config = ChoreConfig(
             train_trial=ttrial,
+            new_bert_eot=False,
             # gpt2_embed_sim=True
         )
         tr_strats = (
@@ -267,7 +268,7 @@ if __name__ == '__main__':
             pretty=False
         )
     # write('in')
-    # write('out')
+    write('out')
 
     def get_one_model_numbers(domain: str = 'in'):
         def prettier_acc(a: float) -> str:

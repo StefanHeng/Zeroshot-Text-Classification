@@ -98,7 +98,7 @@ config_dict = {
             # in-domain evaluation has the same labels as training
             go_emotion=dict(
                 path='UTCD/in-domain/go_emotion', aspect='sentiment', eval_labels_same=True, domain='in',
-                name='GoEmotion', name_compact='GoEmotion'
+                name='GoEmotions', name_compact='GoEmotions'
             ),
             sentiment_tweets_2020=dict(
                 path='UTCD/in-domain/sentiment_tweets_2020', aspect='sentiment', eval_labels_same=True, domain='in',
@@ -115,7 +115,7 @@ config_dict = {
             ),
             clinc_150=dict(
                 path='UTCD/in-domain/clinc_150', aspect='intent', eval_labels_same=True, domain='in',
-                name='Clinc-150', name_compact='Clinc'
+                name='Clinc-150', name_compact='Clinc-150'
             ),
             slurp=dict(
                 path='UTCD/in-domain/slurp', aspect='intent', eval_labels_same=False, domain='in',
@@ -141,7 +141,7 @@ config_dict = {
             ),
             finance_sentiment=dict(
                 path='UTCD/out-of-domain/finance_sentiment', aspect='sentiment', eval_labels_same=True, domain='out',
-                name='Financial Phrase Bank', name_compact='Financial Phrase'
+                name='Financial Phrase Bank', name_compact='Fin. Phrase Bank'
             ),
             yelp=dict(
                 path='UTCD/out-of-domain/yelp', aspect='sentiment', eval_labels_same=True, domain='out',

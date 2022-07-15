@@ -20,7 +20,8 @@ def get_chore_base() -> str:
 class ChoreConfig:
     def __init__(
             self, shuffle: bool = 'new', lower_5ep_sanity_check: bool = True, explicit_version: int = 2,
-            train_trial: str = 'default', with_arxiv: bool = False, gpt2_embed_sim: bool = False
+            train_trial: str = 'default', with_arxiv: bool = False, gpt2_embed_sim: bool = False,
+            new_bert_eot: bool = True
     ):
         ca.check_mismatch('Shuffle Strategy', shuffle, ['ori', 'new'])
         ca.check_mismatch('Explicit Training Version', explicit_version, [1, 2])
@@ -51,13 +52,15 @@ class ChoreConfig:
         gp_vanilla_out = ['gpt2-nvidia', 'vanilla', 'out-of-domain, 2022-04-06_23-43-19']
         gp_implicit_sep_in, gp_implicit_sep_out = None, None
         gp_explicit_in, gp_explicit_out = None, None
+        seq_vanilla_in, seq_vanilla_out = None, None
         if train_trial == 'intent-only':
             rand_vanilla_in = ['binary-bert', 'rand, vanilla, intent-only', 'in-domain, 06.02.22']
             rand_vanilla_out = ['binary-bert', 'rand, vanilla, intent-only', 'out-of-domain, 06.02.22']
             rand_implicit_sep_in = ['binary-bert', 'rand, implicit-sep, intent-only', 'in-domain, 06.02.22']
             rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, intent-only', 'out-of-domain, 06.02.22']
         if train_trial == 'asp-norm':
-            new_bin_bert = True
+            seq_vanilla_in = ['bert-seq-cls', 'vanilla', 'in-domain, 06.13.22']
+            seq_vanilla_out = ['bert-seq-cls', 'vanilla', 'out-of-domain, 06.14.22']
 
             assert explicit_version == 2
             rand_vanilla_in = ['binary-bert', 'rand, vanilla, asp-norm', 'in-domain, 06.04.22']
@@ -66,7 +69,7 @@ class ChoreConfig:
             rand_implicit_sep_out = ['binary-bert', 'rand, implicit-sep, asp-norm', 'out-of-domain, 06.04.22']
             rand_explicit_in = ['binary-bert', 'rand, explicit, asp-norm', 'in-domain, 06.06.22']
             rand_explicit_out = ['binary-bert', 'rand, explicit, asp-norm', 'out-of-domain, 06.06.22']
-            if new_bin_bert:
+            if new_bert_eot:
                 rand_vanilla_in[-1] = 'in-domain, 06.15.22'
                 rand_vanilla_out[-1] = 'out-of-domain, 06.15.22'
                 rand_implicit_sep_in[-1] = 'in-domain, 06.15.22'
@@ -190,8 +193,8 @@ class ChoreConfig:
                 ('gpt2-nvidia', 'NA', 'explicit', 'in', '3ep'): gp_explicit_in,
                 ('gpt2-nvidia', 'NA', 'explicit', 'out', '3ep'): gp_explicit_out,
 
-                ('bert-seq-cls', 'NA', 'vanilla', 'in', '3ep'): ['bert-seq-cls', 'vanilla', 'in-domain, 06.13.22'],
-                ('bert-seq-cls', 'NA', 'vanilla', 'out', '3ep'):  ['bert-seq-cls', 'vanilla', 'out-of-domain, 06.14.22']
+                ('bert-seq-cls', 'NA', 'vanilla', 'in', '3ep'): seq_vanilla_in,
+                ('bert-seq-cls', 'NA', 'vanilla', 'out', '3ep'):  seq_vanilla_out
             }),
             'pretty': {
                 'model-name': {

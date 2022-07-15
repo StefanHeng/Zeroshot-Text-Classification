@@ -729,7 +729,7 @@ if __name__ == '__main__':
             kind=kd, save=sv, title='none',
             get_overlap_args=dict(stat=st, stat_args=args, weighted_average=False),
             fig_args=dict(
-                figsize=(10, 7),
+                figsize=(11, 7.5),
                 # gridspec_kw=dict(width_ratios=[9, 0.5])
             ),
             cbar_ax=False

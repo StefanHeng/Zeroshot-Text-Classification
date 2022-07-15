@@ -80,8 +80,8 @@
                 "aspect": "sentiment",
                 "eval_labels_same": true,
                 "domain": "in",
-                "name": "GoEmotion",
-                "name_compact": "GoEmotion",
+                "name": "GoEmotions",
+                "name_compact": "GoEmotions",
                 "splits": {
                     "train": {
                         "labels": [
@@ -351,7 +351,7 @@
                 "eval_labels_same": true,
                 "domain": "in",
                 "name": "Clinc-150",
-                "name_compact": "Clinc",
+                "name_compact": "Clinc-150",
                 "splits": {
                     "train": {
                         "labels": [
@@ -1081,7 +1081,7 @@
                 "eval_labels_same": true,
                 "domain": "out",
                 "name": "Financial Phrase Bank",
-                "name_compact": "Financial Phrase",
+                "name_compact": "Fin. Phrase Bank",
                 "splits": {
                     "train": {
                         "labels": [
