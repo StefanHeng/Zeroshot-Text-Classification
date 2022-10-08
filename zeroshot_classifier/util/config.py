@@ -234,7 +234,7 @@ ext = config_dict['UTCD']['dataset_ext']
 
 def _re_call() -> Callable[[str], int]:
     if not hasattr(_re_call, 'token_pattern'):
-        # taken from sklearn.CountVectorizer, which was `r"(?u)\b\w\w+\b"`
+        # taken from sklearn.CountVectorizer
         _re_call.token_pattern = re.compile(r'(?u)\b\w+\b')
     return lambda x: len(_re_call.token_pattern.findall(x))
 
