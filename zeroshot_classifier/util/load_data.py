@@ -508,6 +508,7 @@ if __name__ == '__main__':
             ic(c, len(c))
     # check_sampling()
 
+
     def save_aspect_norm_dset():
         seed = sconfig('random-seed')
         data = get_data(in_domain_data_path, normalize_aspect=seed, domain='in')
