@@ -236,41 +236,54 @@ if __name__ == '__main__':
         # plot_setups_acc(setups, domain='out', train_strategy='implicit', save=False)
     # plot_in_implicit()
 
-    def plot_one_model(domain: str = 'in', with_5ep=False):
-        # md_nm = 'binary-bert'
+    def plot_one_model(domain: str = 'in', after_best_val: bool = True, with_5ep=False):
+        md_nm = 'binary-bert'
         # md_nm = 'bi-encoder'
-        md_nm = 'gpt2-nvidia'
-        if md_nm == 'gpt2-nvidia':
-            tr_strat = 'NA'
-        else:
-            tr_strat = 'rand'
-        if with_5ep:
+        # md_nm = 'gpt2-nvidia'
+        if after_best_val:
             _setups = [
-                ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
-                # ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '3ep', ':', ' for 3 epochs'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '3ep', ':', ' for 3 epochs'),
-                ('binary-bert', 'rand', 'vanilla', '5ep', '-', ' for 5 epochs'),
-                # ('binary-bert', 'rand', 'implicit', '5ep', '-', ' for 5 epochs'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '5ep', '-', ' for 5 epochs'),
-                # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '5ep', '-', ' for 5 epochs')
+                ('binary-bert', 'vanilla'),
+                ('binary-bert', 'implicit'),
+                ('binary-bert', 'implicit-on-text-encode-aspect'),
+                # ('binary-bert', 'implicit-on-text-encode-sep'),
+                ('binary-bert', 'explicit'),
             ]
-            keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
-            keys += ['line_style', 'label_postfix']
-            setups = [dict(zip(keys, s)) for s in _setups]
+            setups = [
+                dict(model_name=md_nm, sampling_strategy='rand', training_strategy=tr_strat, train_description='8ep')
+                for (md_nm, tr_strat) in _setups
+            ]
         else:
-            _setups = [
-                (md_nm, tr_strat, 'vanilla'),
-                # (md_nm, tr_strat, 'implicit'),
-                # (md_nm, tr_strat, 'implicit-on-text-encode-aspect'),
-                (md_nm, tr_strat, 'implicit-on-text-encode-sep'),
-                (md_nm, tr_strat, 'explicit')
-            ]
-            setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
+            if md_nm == 'gpt2-nvidia':
+                tr_strat = 'NA'
+            else:
+                tr_strat = 'rand'
+            if with_5ep:
+                _setups = [
+                    ('binary-bert', 'rand', 'vanilla', '3ep', ':', ' for 3 epochs'),
+                    # ('binary-bert', 'rand', 'implicit', '3ep', ':', ' for 3 epochs'),
+                    # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '3ep', ':', ' for 3 epochs'),
+                    # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '3ep', ':', ' for 3 epochs'),
+                    ('binary-bert', 'rand', 'vanilla', '5ep', '-', ' for 5 epochs'),
+                    # ('binary-bert', 'rand', 'implicit', '5ep', '-', ' for 5 epochs'),
+                    # ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', '5ep', '-', ' for 5 epochs'),
+                    # ('binary-bert', 'rand', 'implicit-on-text-encode-sep', '5ep', '-', ' for 5 epochs')
+                ]
+                keys = ['model_name', 'sampling_strategy', 'training_strategy', 'train_description']
+                keys += ['line_style', 'label_postfix']
+                setups = [dict(zip(keys, s)) for s in _setups]
+            else:
+                _setups = [
+                    (md_nm, tr_strat, 'vanilla'),
+                    # (md_nm, tr_strat, 'implicit'),
+                    # (md_nm, tr_strat, 'implicit-on-text-encode-aspect'),
+                    (md_nm, tr_strat, 'implicit-on-text-encode-sep'),
+                    (md_nm, tr_strat, 'explicit')
+                ]
+                setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
         # ic(setups)
 
         ttrial = 'asp-norm'
-        chore_config = ChoreConfig(train_trial=ttrial)
+        chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
 
         domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
         md_nm = cconfig('pretty.model-name')[md_nm]
@@ -278,11 +291,12 @@ if __name__ == '__main__':
         if ttrial:
             title = f'Aspect-Normalized {title}'
         plot_setups_acc(
-            setups, domain=domain, save=True, color_code_by='training_strategy', pretty_keys='training_strategy',
-            ylim=(0, 100), title=title, chore_config=chore_config
+            setups, domain=domain, save=False, color_code_by='training_strategy', pretty_keys='training_strategy',
+            # ylim=(0, 100),
+            title=title, chore_config=chore_config
         )
     plot_one_model(domain='in')
-    plot_one_model(domain='out')
+    # plot_one_model(domain='out')
 
     def plot_intent_only(domain: str = 'in'):
         setups = [
