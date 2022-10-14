@@ -1,7 +1,11 @@
+import os
 from os.path import join as os_join
 
+import torch
+import transformers
 from transformers import GPT2TokenizerFast, GPT2ForSequenceClassification
 
+from stefutil import *
 from zeroshot_classifier.util import *
 import zeroshot_classifier.util.utcd as utcd_util
 from zeroshot_classifier.preprocess import get_explicit_dataset
@@ -14,14 +18,6 @@ TRAIN_STRATEGY = 'explicit'
 
 
 if __name__ == '__main__':
-    import os
-
-    import torch
-    import transformers
-
-    from stefutil import *
-    import zeroshot_classifier.util.utcd as utcd_util
-
     seed = sconfig('random-seed')
 
     NORMALIZE_ASPECT = True
@@ -52,7 +48,7 @@ if __name__ == '__main__':
         if NORMALIZE_ASPECT:
             dset_args['normalize_aspect'] = seed
         tr, vl = get_explicit_dataset(**dset_args)
-        logger.info(f'Loaded {logi(len(tr))} training samples, {logi(len(vl))} eval samples')
+        logger.info(f'Loaded {pl.i(len(tr))} training samples, {pl.i(len(vl))} eval samples')
 
         transformers.set_seed(seed)
         train_args = dict(
@@ -65,13 +61,12 @@ if __name__ == '__main__':
             model_name=MODEL_NAME.replace(' ', '-'), output_path=HF_MODEL_NAME, mode='explicit',
             sampling=None, normalize_aspect=NORMALIZE_ASPECT
         )
-        mic(dir_nm)
         train_args = get_train_args(model_name=GPT2_MODEL_NAME, dir_name=dir_nm, **train_args)
         trainer_args = dict(
             model=model, args=train_args, train_dataset=tr, eval_dataset=vl, compute_metrics=compute_metrics
         )
         trainer = ExplicitTrainer(name=f'{MODEL_NAME} Train', with_tqdm=True, **trainer_args)
-        save_path = os_join(trainer.log_output_dir, 'trained')
+        save_path = os_join(trainer.args.output_dir, 'trained')
         mic(save_path)
         logger.info('Launching Training... ')
         if resume:
@@ -84,7 +79,7 @@ if __name__ == '__main__':
         mic(save_path)
         mic(os.listdir(save_path))
     dir_nm_ = '2022-06-19_13-13-54_Explicit-Pretrain-Aspect-NVIDIA-GPT2-gpt2-medium-explicit-aspect-norm'
-    ckpt_path = os_join(utcd_util.get_output_base(), u.proj_dir, u.model_dir, dir_nm_, 'checkpoint-31984')
+    ckpt_path = os_join(utcd_util.get_base_path(), u.proj_dir, u.model_dir, dir_nm_, 'checkpoint-31984')
     mic(ckpt_path)
     train(resume=ckpt_path)
 

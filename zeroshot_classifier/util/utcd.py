@@ -13,8 +13,6 @@ import pandas as pd
 import torch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.manifold import TSNE
-if torch.cuda.is_available():
-    from tsnecuda import TSNE as cuTSNE
 from datasets import Value, Features, ClassLabel, Sequence, Dataset, DatasetDict
 from sentence_transformers import SentenceTransformer
 import spacy
@@ -23,7 +21,6 @@ from matplotlib import transforms
 from matplotlib.patches import Ellipse
 from matplotlib.colors import to_rgba
 from matplotlib.patheffects import withStroke
-from adjustText import adjust_text
 import seaborn as sns
 from tqdm.auto import tqdm
 import gdown
@@ -33,24 +30,20 @@ from zeroshot_classifier.util.util import *
 from zeroshot_classifier.util.data_path import BASE_PATH, PROJ_DIR, DSET_DIR
 
 
+LOAD_TSNE = False
+if LOAD_TSNE and torch.cuda.is_available():
+    from tsnecuda import TSNE as cuTSNE
+
+
+logger = get_logger('UTCD')
+
+
 EOT_TOKEN = '[eot]'  # end of turn token for sgd
 
 
-def get_output_base():
-    # For remote machines, save heavy-duty data somewhere else to save `/home` disk space
-    hnm = get_hostname()
-    if 'clarity' in hnm:  # Clarity lab
-        return '/data'
-    elif 'arc-ts' in hnm:  # Great Lakes; `profmars0` picked arbitrarily among [`profmars0`, `profmars1`]
-        # Per https://arc.umich.edu/greatlakes/user-guide/
-        return os_join('/scratch', 'profmars_root', 'profmars0', 'stefanhg')
-    else:
-        return BASE_PATH
-
-
 def get_utcd_from_gdrive(domain: str = 'in'):
-    ca(domain=domain)
-    path = os_join(BASE_PATH, PROJ_DIR, DSET_DIR, 'UTCD')
+    ca(dataset_domain=domain)
+    path = os_join(u.proj_path, u.dset_dir, 'UTCD')
     os.makedirs(path, exist_ok=True)
     if domain == 'in':
         url = 'https://drive.google.com/uc?id=1V7IzdZ9HQbFUQz9NzBDjmqYBdPd9Yfe3'
@@ -59,7 +52,10 @@ def get_utcd_from_gdrive(domain: str = 'in'):
         url = 'https://drive.google.com/uc?id=1nd32_UrFbgoCgH4bDtFFD_YFZhzcts3x'
         fnm = os_join(path, 'out-of-domain')
     fnm = f'{fnm}.zip'
+    logger.info(f'Downloading from GDrive url {pl.i(url)} to {pl.i(fnm)}... ')
     gdown.download(url=url, output=fnm, quiet=False)
+
+    logger.info(f'Extracting {pl.i(fnm)} to {pl.i(path)}... ')
     with ZipFile(fnm, 'r') as zip_:
         zip_.extractall(path)
         zip_.close()
@@ -77,19 +73,20 @@ def process_utcd_dataset(domain: str = 'in', join=False):
 
     Save processed datasets to disk
     """
-    logger = get_logger('Process UTCD')
     ca(dataset_domain=domain)
     output_dir = 'UTCD-in' if domain == 'in' else 'UTCD-out'
-    ext = sconfig('UTCD.dataset_ext')
-    path_dsets = os_join(BASE_PATH, PROJ_DIR, DSET_DIR)
-    path_out = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed')
-    logger.info(f'Processing UTCD datasets with {log_dict(dict(domain=domain, join=join))}... ')
+    path_dsets = os_join(u.proj_path, u.dset_dir)
+    domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
+    if not os.path.exists(os_join(path_dsets, 'UTCD', domain_str)):
+        get_utcd_from_gdrive(domain=domain)
+    path_out = os_join(get_base_path(), PROJ_DIR, DSET_DIR, 'processed')
+    logger.info(f'Processing UTCD datasets with {pl.i(dict(domain=domain, join=join))}... ')
 
     def path2dsets(dnm: str, d_dset: Dict) -> Union[DatasetDict, Dict[str, pd.DataFrame]]:
-        logger.info(f'Processing dataset {logi(dnm)}... ')
-        path = d_dset['path']
-        path = os_join(path_dsets, f'{path}.{ext}')
-        with open(path) as f:
+        logger.info(f'Processing dataset {pl.i(dnm)}... ')
+        path_ = d_dset['path']
+        path_ = os_join(path_dsets, f'{path_}.json')
+        with open(path_) as f:
             dsets_: Dict = json.load(f)
 
         def json2dset(split: str, dset: Dict[str, List[str]]) -> Union[Dataset, pd.DataFrame]:
@@ -139,7 +136,6 @@ def process_utcd_dataset(domain: str = 'in', join=False):
             # The string labels **may overlap** across the datasets
             # Keep internal feature label ordering same as dataset id
             lbs_dset = sorted(dnm2id, key=dnm2id.get)
-            ic(dnm2id, lbs_dset)
             features = Features(text=Value(dtype='string'), labels=lbs_global, dataset_id=ClassLabel(names=lbs_dset))
             return Dataset.from_pandas(df, features=features)
         tr = dfs2dset([prep_single(dnm, dsets['train']) for dnm, dsets in d_dsets.items()])
@@ -147,11 +143,11 @@ def process_utcd_dataset(domain: str = 'in', join=False):
         dsets = DatasetDict(train=tr, test=vl)
         path = os_join(path_out, output_dir)
         dsets.save_to_disk(path)
-        logger.info(f'{logi("Joined")} Dataset saved to {logi(path)} ')
+        logger.info(f'{pl.i("Joined")} Dataset saved to {pl.i(path)} ')
     else:
         for dnm, dsets in d_dsets.items():
             dsets.save_to_disk(os_join(path_out, dnm))
-            logger.info(f'Dataset {logi(dnm)} saved to {logi(path_out)}')
+            logger.info(f'Dataset {pl.i(dnm)} saved to {pl.i(path_out)}')
 
 
 def map_ag_news():
@@ -264,8 +260,7 @@ class VisualizeOverlap:
         ca.check_mismatch('Sample Type', kind, ['label', 'text'])
         ca.check_mismatch('Overlap Metric', metric, ['harmonic', 'absolute'])
         ca.check_mismatch('Word Statistics', stat, ['count', 'tfidf'])
-        logger = get_logger('Get UTCD Overlap')
-        logger.info(f'Getting UTCD Overlap for {log_dict(kind=kind, metric=metric, stat=stat, stat_args=stat_args)}')
+        logger.info(f'Getting UTCD Overlap for {pl.i(kind=kind, metric=metric, stat=stat, stat_args=stat_args)}')
         if stat == 'tfidf':
             def tokenize(pbar) -> Callable:
                 def _tokenize(txt: str) -> List[str]:
@@ -278,7 +273,7 @@ class VisualizeOverlap:
             assert 'token_pattern' not in stat_args and 'tokenizer' not in stat_args
             stat_args['token_pattern'] = None
         elif stat_args is not None:
-            raise NotImplementedError(f'{logi("stat_args")} supported for {logi("tfidf")} only')
+            raise NotImplementedError(f'{pl.i("stat_args")} supported for {pl.i("tfidf")} only')
 
         nlp = spacy.load('en_core_web_sm')
         nlp.max_length *= 10  # for `multi_eurlex`
@@ -306,10 +301,10 @@ class VisualizeOverlap:
         in_dnms, out_dnms = VisualizeOverlap.in_dnms, VisualizeOverlap.out_dnms
         for dnm in in_dnms:
             dnm2lemma_count[dnm] = _dnm2lemma_count(dnm, 'train')
-            logger.info(f'Lemmatizing {logi("in-domain")} dataset {logi(dnm)}, {logi("train")} split')
+            logger.info(f'Lemmatizing {pl.i("in-domain")} dataset {pl.i(dnm)}, {pl.i("train")} split')
         for dnm in out_dnms:
             dnm2lemma_count[dnm] = _dnm2lemma_count(dnm, 'test')
-            logger.info(f'Lemmatizing {logi("out-of-domain")} dataset {logi(dnm)}, {logi("test")} split')
+            logger.info(f'Lemmatizing {pl.i("out-of-domain")} dataset {pl.i(dnm)}, {pl.i("test")} split')
         lst_rows = []
         # See below, weighted by #samples for each in-domain dataset; TODO: weight also by label support?
         in_dnm2n_pr = {dnm: sconfig(f'UTCD.datasets.{dnm}.splits.train.n_pair') for dnm in in_dnms}
@@ -459,13 +454,13 @@ class VisualizeOverlap:
         :param n_sample: If given, plot a subset of each dataset randomly
         :param n_sample: If given, plot a subset of each dataset randomly
         """
+        from adjustText import adjust_text
         ca.check_mismatch('Sample Type', kind, ['label', 'text'])
         ca.check_mismatch('t-SNE Mode', mode, ['sklearn', 'cuda'])
         if aspect is not None:
             ca.check_mismatch('Dataset Aspect', aspect, ['sentiment', 'intent', 'topic'])
-        logger = get_logger('UTCD Embedding Plot')
         d_log = dict(kind=kind, aspect=aspect, mode=mode)
-        logger.info(f'Plotting embeddings on {log_dict(d_log)}... ')
+        logger.info(f'Plotting embeddings on {pl.i(d_log)}... ')
         d_vect = VisualizeOverlap.get_utcd_embeddings(kind=kind, aspect=aspect, **kwargs)
         if n_sample:
             def _get_sample(dnm):
@@ -491,7 +486,7 @@ class VisualizeOverlap:
             args['init'] = 'random'
             del args['random_state']
 
-        logger.info(f'Running t-SNE on {logi(len(vect))} vectors with args {log_dict(args)}... ')
+        logger.info(f'Running t-SNE on {pl.i(len(vect))} vectors with args {pl.i(args)}... ')
         mapped = cls(**args).fit_transform(vect)
 
         logger.info('Plotting... ')
@@ -611,10 +606,10 @@ class VisualizeOverlap:
             title = f'{title} on {aspect.capitalize()}'
         plt.suptitle(title)
 
-        l = ax.get_legend()  # need to have the seaborn legend added first
-        l.remove()
-        l = fig.legend(title=k_dnm.replace('_', ' '), loc='lower center', bbox_transform=fig.transFigure, ncol=3)
-        for t in l.get_texts():
+        lgd = ax.get_legend()  # need to have the seaborn legend added first
+        lgd.remove()
+        lgd = fig.legend(title=k_dnm.replace('_', ' '), loc='lower center', bbox_transform=fig.transFigure, ncol=3)
+        for t in lgd.get_texts():
             t.set_text(map_label(t.get_text()))
         legend_v_ratio = 0.15
         plt.subplots_adjust(bottom=legend_v_ratio)
@@ -631,10 +626,12 @@ class VisualizeOverlap:
 if __name__ == '__main__':
     from datasets import load_from_disk
 
+    mic.output_width = 512
+
     np.random.seed(sconfig('random-seed'))
 
     def sanity_check(dsets_nm):
-        path = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dsets_nm)
+        path = os_join(get_base_path(), PROJ_DIR, DSET_DIR, 'processed', dsets_nm)
         mic(path)
         dset = load_from_disk(path)
         te, vl = dset['train'], dset['test']
@@ -655,15 +652,15 @@ if __name__ == '__main__':
     def get_utcd_out():
         process_utcd_dataset(domain='out', join=True)
         sanity_check('UTCD-out')
-    # get_utcd_out()
+    get_utcd_out()
 
     def sanity_check_ln_eurlex():
-        path = os_join(get_output_base(), PROJ_DIR, DSET_DIR, 'processed', 'multi_eurlex')
+        path = os_join(get_base_path(), PROJ_DIR, DSET_DIR, 'processed', 'multi_eurlex')
         mic(path)
         dset = load_from_disk(path)
         mic(dset, len(dset))
     # sanity_check_ln_eurlex()
-    # ic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
+    # mic(lst2uniq_ids([5, 6, 7, 6, 5, 1]))
 
     def output_utcd_info():
         df = get_utcd_info()
@@ -709,13 +706,13 @@ if __name__ == '__main__':
             for text, labels in dsets.items():
                 if len(labels) > 1:
                     d = dict(dset=dnm, labels=labels, text=text)
-                    print(log_dict(d))
+                    print(pl.i(d))
     # chore_check_multi_label()
 
     vs = VisualizeOverlap()
 
     def plot_token_overlap():
-        # ic(get_utcd_overlap())
+        # mic(get_utcd_overlap())
         kd = 'label'
         # kd = 'text'
         # st = 'count'
@@ -735,12 +732,12 @@ if __name__ == '__main__':
             cbar_ax=False
         )
         # vs.profile_runtime(lambda: get_utcd_overlap(kind=kd))
-    plot_token_overlap()
+    # plot_token_overlap()
 
     def plot_encoded_overlap():
         kd = 'text'
         # kd = 'label'
-        # ic(vs.get_utcd_embeddings(kind=kd))
+        # mic(vs.get_utcd_embeddings(kind=kd))
         # sv = False
         sv = True
         cnm = f'{kd} embedding cache'

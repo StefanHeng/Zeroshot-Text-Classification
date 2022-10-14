@@ -35,7 +35,7 @@ from tqdm.auto import tqdm
 
 from stefutil import *
 from zeroshot_classifier.util import *
-from zeroshot_classifier.util.train import MyEvalPrediction
+from zeroshot_classifier.util.training import MyEvalPrediction
 import zeroshot_classifier.util.utcd as utcd_util
 from zeroshot_classifier.preprocess import get_dataset
 
@@ -80,7 +80,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             dataset_name, split = key
             key = f'{dataset_name}-{split}'
             if key not in self:
-                path = os_join(utcd_util.get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
+                path = os_join(utcd_util.get_base_path(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
                 dset = datasets.load_from_disk(path)[split]
                 # See `zeroshot_classifier.util.util.py::process_utcd_dataset`
                 feats = dset.features['labels'].feature
@@ -138,7 +138,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
         self.logger = get_logger(self.__class__.__qualname__)
         d_log = dict(form=form, added_vocab=list(self.get_added_vocab().keys()), vocab_size=self.vocab_size)
-        self.logger.info(f'{logi(self.__class__.__qualname__)} initialized with {log_dict(d_log)}')
+        self.logger.info(f'{pl.i(self.__class__.__qualname__)} initialized with {pl.i(d_log)}')
 
     @property
     def max_len_single_sentence(self) -> int:
@@ -198,7 +198,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 n_cls = len(descs)
                 # `label` is shared across all datasets, map to local label within dataset
                 if self.cache_utcd is None:
-                    path = os_join(utcd_util.get_output_base(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
+                    path = os_join(utcd_util.get_base_path(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
                     # cos `Sequential`; each split, the label is the same
                     self.cache_utcd = datasets.load_from_disk(path)[split].features['labels'].feature
                 # The ordering indicates int<=>str label mapping, i.e., index is int label,
@@ -252,10 +252,9 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     # Crop the text portion so that the longest label can be generated
                     ln_t_ = room - ((1+ln_q+1) + (1+1) + 1)
                     assert ln_t_ > 0
-                    self.logger.warning(f'Sample without answer longer than model max sequence length and '
-                                        f'dataset {logi(dset_nm)} labels: '
-                                        f'{logi(ln_cont)} > {logi(self.model_max_length)} - '
-                                        f'Text portion cropped: {logi(ln_t)} > {logi(ln_t_)} for inference')
+                    self.logger.warning(f'{pl.i(dset_nm)} sample w/o answer longer than model max sequence length and '
+                                        f'labels: {pl.i(ln_cont)} > {pl.i(self.model_max_length)} - '
+                                        f'Text portion cropped for inference: ({pl.i(ln_t)} > {pl.i(ln_t_)})')
                     ids_text = ids_text[:ln_t_]
             elif mode == 'train':
                 ln_ids = ln_q + ln_t + ln_a
@@ -264,9 +263,9 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                     # i.e., ensure no classification label is cropped
                     ln_t_ = self.max_len_single_sentence - (ln_q + ln_a)
                     assert ln_t_ > 0
-                    self.logger.warning(f'Sample with answer longer than model max sequence length for '
-                                        f'dataset {logi(dset_nm)}: {logi(ln_ids+6)} > {logi(self.model_max_length)} - '
-                                        f'Text portion cropped: {logi(ln_t)} > {logi(ln_t_)} for training')
+                    self.logger.warning(f'{pl.i(dset_nm)} sample w/ answer longer than model sequence length'
+                                        f': {pl.i(ln_ids+6)} > {pl.i(self.model_max_length)} - '
+                                        f'Text portion cropped for training: ({pl.i(ln_t)} => {pl.i(ln_t_)})')
                     ids_text = ids_text[:ln_t_]
             # else, `stats`, no truncation
             # Number of contex tokens, up until answer token, inclusive
@@ -312,10 +311,10 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         # See `zeroshot_classifier.util.util.py::process_utcd_dataset`
         keys_ = ['dataset_id', 'text', 'labels', 'label_options']
         if mode == 'inference-sample':
-            assert not is_batched, f'Batched {logi("inference-sample")} not supported'
+            assert not is_batched, f'Batched {pl.i("inference-sample")} not supported'
         else:
             assert 'label_options' not in samples, \
-                f'{logi("label_options")} supported for {logi("inference-sample")} only'
+                f'{pl.i("label_options")} supported for {pl.i("inference-sample")} only'
         if is_batched:
             ds = [call_single(i, d_id, txt, lb) for i, (d_id, txt, lb) in enumerate(zip(
                 *[samples[k] for k in keys_ if k in samples]  # only `label_options` may not be required
@@ -543,7 +542,7 @@ def get_model_n_tokenizer(model_name='gpt2', form: str = 'vanilla', save_gpu_mem
 
 def get_train_setup(
         model_name='gpt2', do_eval=True, dir_name: str = None, train_args: Dict = None,
-        save_gpu_memory: bool = True
+        save_gpu_memory: bool = True, normalize_aspect: bool = False
 ) -> TrainingArguments:
     d_train_args = {
         'debug': dict(
@@ -590,12 +589,11 @@ def get_train_setup(
     else:
         bsz_tr = bsz_vl = bsz
     dir_nm = dir_name or f'{now(for_path=True)}_{MODEL_NAME}-{model_name}'
-    mic(dir_nm)
     args = dict(
-        output_dir=os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, dir_nm),
+        output_dir=os_join(utcd_util.get_base_path(), PROJ_DIR, MODEL_DIR, dir_nm),
         do_train=True,
         do_eval=do_eval,
-        evaluation_strategy='steps' if do_eval else 'no',
+        evaluation_strategy='epoch' if do_eval else 'no',
         per_device_train_batch_size=bsz_tr,
         per_device_eval_batch_size=bsz_vl,
         gradient_accumulation_steps=gas,
@@ -611,15 +609,13 @@ def get_train_setup(
         num_train_epochs=n_ep,
         lr_scheduler_type=sch,
         warmup_ratio=1e-2,
-        log_level='info',
-        # log_on_each_node=False,
+        log_level='warning',
         log_level_replica='info',
         logging_strategy='steps',
         logging_steps=1,
         save_strategy='epoch',
         fp16=torch.cuda.is_available(),
         fp16_full_eval=False,
-        # fp16_full_eval=False,  # As in doc, harms metric
         optim=OptimizerNames.ADAMW_TORCH,
         disable_tqdm=True,
         # Pass dataset name information down to `compute_loss` for computing text classification accuracy
@@ -628,6 +624,12 @@ def get_train_setup(
         # Set to True on CPU gives warning; Enable for fitting in `clarity1` memory
         gradient_checkpointing=torch.cuda.is_available() and save_gpu_memory
     )
+    if normalize_aspect:
+        args.update(dict(
+            load_best_model_at_end=True,
+            metric_for_best_model='eval_loss',
+            greater_is_better=False
+        ))
     if train_args is None:
         train_args = dict()
     args = {k: v for k, v in args.items() if v is not None}
@@ -642,17 +644,20 @@ def compute_metrics(eval_pred: MyEvalPrediction):
     # Intended to work with `CustomTrainer.prediction_step`
     if not hasattr(compute_metrics, 'metric'):
         compute_metrics.metric = datasets.load_metric('accuracy')
-    # Labels are per-sample already, see `CustomTrainer.prediction_step`
+    # Labels are per-sample already, see `MyTrainer::prediction_step`
     preds, trues, dids = eval_pred.predictions, eval_pred.label_ids, eval_pred.dataset_ids
-    return compute_metrics.metric.compute(predictions=preds, references=trues)
+    return dict(cls_acc=compute_metrics.metric.compute(predictions=preds, references=trues)['accuracy'])
 
 
 def get_all_setup(
         model_name: str = None, dataset_name: str = 'ag_news', form: str = 'vanilla',
         n_sample=None, random_seed=None, do_eval=True, custom_logging=True,
-        train_args: Dict = None, dataset_args: Dict = None,
-        is_ddp: Union[bool, int] = False  # so that my own logging is correct
-) -> Tuple[GPT2LMHeadModel, Union[GPT2TokenizerFast, ZsGPT2Tokenizer], datasets.Dataset, datasets.Dataset, Trainer]:
+        train_args: Dict = None, dataset_args: Dict = None, trainer_args: Dict = None,
+        is_ddp: Union[bool, int] = False, use_tqdm: bool = True  # so that my own logging is correct
+) -> Tuple[GPT2LMHeadModel, Union[GPT2TokenizerFast, ZsGPT2Tokenizer], Trainer]:
+    dataset_args = dataset_args or dict()
+    normalize_aspect = dataset_args.get('normalize_aspect', None)
+
     if model_name == 'debug-gpt-ori':  # Sanity check: As if keep training GPT-2, with padding for simplicity
         conf = AutoConfig.from_pretrained('gpt2')
         conf.update(dict(use_cache=False))
@@ -676,7 +681,7 @@ def get_all_setup(
             }
             result['labels'] = result['input_ids'].copy()
             return result
-        tr_map_func = vl_map_func = group_texts
+        tr_map_func = vl_map_func = ts_map_func = group_texts
     else:
         save_gpu_mem = 'arc-ts' not in get_hostname()
         # save_gpu_mem = True  # Gradient checkpointing still needed - otherwise doesn't fit in 44G GPU
@@ -687,29 +692,34 @@ def get_all_setup(
             sampling=None, normalize_aspect=dataset_args.get('normalize_aspect', None)
         )
         train_args_ = get_train_setup(
-            model_name, do_eval=do_eval, dir_name=dir_nm, train_args=train_args, save_gpu_memory=save_gpu_mem
+            model_name, do_eval=do_eval, dir_name=dir_nm, train_args=train_args,
+            save_gpu_memory=save_gpu_mem, normalize_aspect=normalize_aspect
         )
         tr_map_func = Tokenize(tokenizer, dataset_name=dataset_name, split='train')
-        vl_map_func = Tokenize(tokenizer, dataset_name=dataset_name, split='test')
+        # Evaluation set has the same set of labels as training set by construction,
+        # see `load_data:dataset2train_eval_split`
+        # All `Tokenize` care about is the corresponding set of labels
+        vl_map_func = Tokenize(tokenizer, dataset_name=dataset_name, split='train')
+        ts_map_func = Tokenize(tokenizer, dataset_name=dataset_name, split='test')
 
-    if dataset_args is None:
-        dataset_args = dict()
-    dset_tr_, dset_vl_ = get_dataset(
+    splits = ('train', 'eval', 'test') if normalize_aspect else ('train', 'test')
+    dsets = get_dataset(
         dataset_name=dataset_name,
-        map_func=dict(train=tr_map_func, test=vl_map_func), remove_columns=['text', 'labels'],
-        n_sample=n_sample, shuffle_seed=random_seed, pbar=True,
+        map_func=dict(train=tr_map_func, eval=vl_map_func, test=ts_map_func), remove_columns=['text', 'labels'],
+        n_sample=n_sample, shuffle_seed=random_seed, pbar=True, splits=splits,
         fast='debug' not in model_name, **dataset_args
     )
-    trainer_args = dict(
+    _trainer_args = dict(
         model=model, args=train_args_, data_collator=data_collator_,
-        train_dataset=dset_tr_, eval_dataset=dset_vl_, compute_metrics=compute_metrics
+        train_dataset=dsets['train'], eval_dataset=dsets.get('eval', None), compute_metrics=compute_metrics
     )
-    trainer_ = GPT2Trainer(
-        tokenizer=tokenizer, custom_logging=custom_logging, compute_cls_acc=model_name != 'debug-gpt-ori',
-        is_ddp=is_ddp,
-        **trainer_args
+    _trainer_args.update(trainer_args or dict())
+    trainer = GPT2Trainer(
+        tokenizer=tokenizer, custom_logging=custom_logging,
+        is_ddp=is_ddp, with_tqdm=use_tqdm,
+        **_trainer_args
     )
-    return model, tokenizer, dset_tr_, dset_vl_, trainer_
+    return model, tokenizer, trainer
 
 
 def plot_dataset_token_length_stats(domain: str = 'in'):
@@ -767,12 +777,14 @@ def plot_dataset_token_length_stats(domain: str = 'in'):
 def load_trained(
         form: str = 'vanilla', epoch: int = 3, normalize_aspect: bool = False
 ) -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokenizer]:
+    ca.check_mismatch('GPT2 Training Strategy', form, ['vanilla', 'implicit', 'explicit'])
+
     logger = get_logger('Load ZS-GPT2 Trained')
     d_log = dict(form=form, epoch=epoch, normalize_aspect=normalize_aspect)
-    logger.info(f'Loading model with {logi(d_log)}... ')
+    logger.info(f'Loading model with {pl.i(d_log)}... ')
     tokenizer_name = 'gpt2'
     if normalize_aspect:
-        assert epoch in [3, 5]
+        assert epoch in [3, 5, 8]
         if epoch == 3:
             if form == 'vanilla':
                 dir_nm = '2022-06-10_11-36-47_NVIDIA-GPT2-gpt2-medium'
@@ -781,14 +793,19 @@ def load_trained(
             else:
                 assert form == 'explicit'
                 dir_nm = '2022-06-13_19-09-32_NVIDIA-GPT2-explicit-aspect-norm'
-        else:  # epoch == 5
+        elif epoch == 5:
             if form == 'vanilla':
                 dir_nm = '2022-06-19_13-08-17_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'
             elif form == 'implicit':
                 dir_nm = '2022-06-19_13-09-36_NVIDIA-GPT2-gpt2-medium-implicit-aspect-norm'
             else:
                 raise NotImplementedError('TODO')
-        path = os_join(u.proj_path, u.model_dir, dir_nm, 'trained')
+        else:  # 8 epoch, model w/ best eval loss
+            if form == 'vanilla':
+                dir_nm = '2022-10-11_23-44-51_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'
+            else:
+                raise NotImplementedError('TODO')
+        path = os_join(get_base_path(), u.proj_dir, u.model_dir, dir_nm, 'trained')
         if form != 'vanilla':  # TODO: all models should have tokenizers saved eventually
             tokenizer_name = path
     else:
@@ -851,12 +868,10 @@ def evaluate(
         f'{logger_name} file-write', typ='file-write',
         file_path=os_join(output_path, f'{now(for_path=True)}_{logger_name}, bsz={batch_size}, {domain}.log')
     )
-    logger.info(f'Running evaluation {logi(domain)} on model {log_dict(d_model)}, with {log_dict(d_eval)}... ')
-    logger_fl.info(f'Running evaluation {domain} on model {log_dict_nc(d_model)}, with {log_dict_nc(d_eval)}... ')
+    logger.info(f'Running evaluation {pl.i(domain)} on model {pl.i(d_model)}, with {pl.i(d_eval)}... ')
+    logger_fl.info(f'Running evaluation {domain} on model {pl.nc(d_model)}, with {pl.nc(d_eval)}... ')
 
     for dnm_ in dataset_names:
-        if dnm_ != 'consumer_finance':  # TODO: debugging
-            continue
         d_info = sconfig(f'UTCD.datasets.{dnm_}.splits.{split}')
         lb2id = defaultdict(lambda: -1)  # If generated invalid descriptive label, will return -1
         labels = d_info['labels']
@@ -885,8 +900,8 @@ def evaluate(
             start=[]
         )
         n_bch = len(idxs_batches)
-        logger.info(f'Running evaluation on dataset {logi(dnm_)}, with labels {logi(labels)}, '
-                    f'of {logi(len(dset))} unique texts in {logi(n_bch)} batches... ')
+        logger.info(f'Running evaluation on dataset {pl.i(dnm_)}, with labels {pl.i(labels)}, '
+                    f'of {pl.i(len(dset))} unique texts in {pl.i(n_bch)} batches... ')
         logger_fl.info(f'Running evaluation on dataset {dnm_}, with labels {labels}, '
                        f'of {len(dset)} unique texts in {n_bch} batches... ')
 
@@ -913,16 +928,16 @@ def evaluate(
                 # **try to be as lenient**: try to extract the text part if possible
                 answer_with_eos = generated[idxs_boa[-1] + len(tokenizer.boa_token):]
                 if len(idxs_boa) > 1:
-                    logger.warning(f'{logi(model_cnm)} generated {logi(len(idxs_boa))} boa_token '
-                                   f'instead of {logi(1)} with [{logi(answer_with_eos)}]')
+                    logger.warning(f'{pl.i(model_cnm)} generated {pl.i(len(idxs_boa))} boa_token '
+                                   f'instead of {pl.i(1)} with [{pl.i(answer_with_eos)}]')
                     logger_fl.warning(f'{model_cnm} generated {len(idxs_boa)} boa_token '
                                       f'instead of {1} with [{answer_with_eos}]')
                 assert len(idxs_boa) == 1
                 idxs_eos = get_substr_indices(answer_with_eos, s_sub=tokenizer.eos_token)
                 # GPT2 would generate multiple `eos_token` for the samples in the batch that terminates early
                 if len(idxs_eos) == 0:  # Still, **try to be as lenient**
-                    logger.warning(f'{logi(model_cnm)} didn\'t finish generating answer '
-                                   f'with [{logi(answer_with_eos)}]')
+                    logger.warning(f'{pl.i(model_cnm)} didn\'t finish generating answer '
+                                   f'with [{pl.i(answer_with_eos)}]')
                     logger_fl.warning(f'{model_cnm} didn\'t finish generating answer with [{answer_with_eos}]')
                     answer = answer_with_eos
                 else:
@@ -939,7 +954,7 @@ def evaluate(
                 ids_pred: List[int] = [lb2id[a.lower()] for a in answers]
                 assert len(ids_pred) >= 1  # sanity check
                 if embed_sim and all(i == -1 for i in ids_pred):  # all generated answer are non-label
-                    logger.warning(f'{logi(model_cnm)} didn\'t generate any valid label option with {logi(answers)}')
+                    logger.warning(f'{pl.i(model_cnm)} didn\'t generate any valid label option with {pl.i(answers)}')
                     logger_fl.warning(f'{model_cnm} didn\'t generate any valid label option with {answers}')
                     ids_pred = []
                     answ_embeds = encoder.encode(answers, batch_size=batch_size)
@@ -968,7 +983,7 @@ def evaluate(
             )
             it.set_postfix(d_log)
             d_log.update(dict(ids_pred=list(preds_batch), ids_true=list(trues_batch)))
-            logger_fl.info(log_dict_nc(d_log))
+            logger_fl.info(pl.nc(d_log))
 
         def check_labels_filled(lbs):  # sanity check, every index is assigned a label
             return np.all((-1 <= lbs) & (lbs < len(labels)))
@@ -983,13 +998,13 @@ def evaluate(
         )
         report = classification_report(trues, preds, **args)
         acc = f'{report["accuracy"]:.3f}'
-        logger.info(f'{logi(dnm_)} Classification Accuracy: {logi(acc)}')
+        logger.info(f'{pl.i(dnm_)} Classification Accuracy: {pl.i(acc)}')
         logger_fl.info(f'{dnm_} Classification Accuracy: {acc}')
 
         df = pd.DataFrame(report).transpose()
         path = os_join(output_path, f'{dnm_}.csv')
         df.to_csv(path)
-        logger.info(f'Evaluation on {logi(dnm_)} written to CSV at {logi(path)}')
+        logger.info(f'Evaluation on {pl.i(dnm_)} written to CSV at {pl.i(path)}')
         logger_fl.info(f'Evaluation on {dnm_} written to CSV at {path}')
 
 
@@ -1010,6 +1025,8 @@ def gpt2_inference(text: str, label_options: List[str]) -> str:
 
 
 if __name__ == '__main__':
+    mic.output_width = 512
+
     seed = sconfig('random-seed')
 
 
@@ -1019,9 +1036,9 @@ if __name__ == '__main__':
         # md_nm = 'debug'
         md_nm = 'gpt2-medium'
 
-        # form = 'vanilla'
+        form = 'vanilla'
         # form = 'implicit'
-        form = 'explicit'
+        # form = 'explicit'
         if form == 'explicit':
             dir_nm = '2022-06-20_22-50-06_Explicit-Pretrain-Aspect-NVIDIA-GPT2-gpt2-medium-explicit-aspect-norm'
             md_nm = os_join(u.proj_path, u.model_dir, dir_nm, 'trained')
@@ -1035,6 +1052,9 @@ if __name__ == '__main__':
 
         asp_norm = True
         dataset_args = dict(normalize_aspect=seed) if asp_norm else dict()
+
+        # debug = True
+        debug = False
 
         if 'debug' in md_nm:
             # train_args = dict(  # overfit small
@@ -1059,21 +1079,24 @@ if __name__ == '__main__':
             # dataset_args = dict()
             train_args = dict(  # Distribute among GPUs & fit in memory; Effectively batch size 128 as in paper
                 # num_train_epochs=3,
-                num_train_epochs=5,
+                num_train_epochs=8,
+                warmup_ratio=1e-1,
                 per_device_train_batch_size=4,
-                gradient_accumulation_steps=8 * 4,
+                per_device_eval_batch_size=4 if debug else 8,
+                gradient_accumulation_steps=2 if debug else 8 * 4,
+                dataloader_num_workers=None if debug else 4
             )
-            # ddp = False
-            ddp = 4
-            mic(trasin_args, ddp)
-        model, tokenizer, dset_tr, dset_vl, trainer = get_all_setup(  # eval set is too large
-            model_name=md_nm, dataset_name=dnm, form=form, do_eval=False, custom_logging=True, n_sample=n,
+            ddp = False
+            # ddp = 4
+        mic(debug, n, asp_norm, ddp)
+        mic(train_args)
+        model, tokenizer, trainer = get_all_setup(
+            model_name=md_nm, dataset_name=dnm, form=form, do_eval=True, custom_logging=True, n_sample=n,
             random_seed=seed,
-            # random_seed=1,
-            train_args=train_args, dataset_args=dataset_args,
+            train_args=train_args, dataset_args=dataset_args, trainer_args=dict(compute_cls_acc=True),
             is_ddp=ddp
         )
-        save_path = os_join(trainer.log_output_dir, 'trained')
+        save_path = os_join(trainer.args.output_dir, 'trained')
         mic(save_path)
         trainer.train()
 
@@ -1088,13 +1111,14 @@ if __name__ == '__main__':
         #     profile_runtime(lambda: evaluate(domain='in', batch_size=48), sleep=2)
         # # profile_evaluation()
 
-        # dom = 'in'
-        dom = 'out'
-        # form = 'vanilla'
+        dom = 'in'
+        # dom = 'out'
+        form = 'vanilla'
         # form = 'implicit'
-        form = 'explicit'
-        n_ep = 3
+        # form = 'explicit'
+        # n_ep = 3
         # n_ep = 5
+        n_ep = 8
         evaluate(
             domain=dom, batch_size=48, form=form, load_model_args=dict(normalize_aspect=True, epoch=n_ep),
             embed_sim=True

@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from sentence_transformers.cross_encoder import CrossEncoder
 from sentence_transformers.cross_encoder.evaluation import CESoftmaxAccuracyEvaluator
 from zeroshot_classifier.util.load_data import (
-    get_data, binary_cls_format, nli_cls_format, get_nli_data, nli_template,
+    get_datasets, binary_cls_format, nli_cls_format, get_nli_data, nli_template,
     in_domain_data_path, out_of_domain_data_path
 )
 
@@ -75,14 +75,14 @@ if __name__ == "__main__":
                 output_path=model_save_path)
 
     if args.command == 'train':
-        data = get_data(in_domain_data_path)
+        data = get_datasets(in_domain_data_path)
         # get keys from data dict
         datasets = list(data.keys())
         train = []
         test = []
         for dataset in datasets:
             if args.mode == 'vanilla':
-                train += binary_cls_format(data[dataset], name=dataset, sampling=args.sampling, mode=args.mode)
+                train += binary_cls_format(data[dataset], dataset_name=dataset, sampling=args.sampling, mode=args.mode)
                 test += binary_cls_format(data[dataset], train=False, mode=args.mode)
             elif args.mode == 'implicit':
                 train += nli_cls_format(data[dataset], name=dataset, sampling=args.sampling)
@@ -119,15 +119,13 @@ if __name__ == "__main__":
         Path(pred_path).mkdir(parents=True, exist_ok=True)
         Path(result_path).mkdir(parents=True, exist_ok=True)
         if args.domain == 'in':
-            data = get_data(in_domain_data_path)
+            data = get_datasets(in_domain_data_path)
         elif args.domain == 'out':
-            data = get_data(out_of_domain_data_path)
+            data = get_datasets(out_of_domain_data_path)
         # get keys from data dict
         datasets = list(data.keys())
 
         # load model
-        from icecream import ic
-        ic(args.model_path)
         model = CrossEncoder(args.model_path)
 
         label_map = ["false", "true"]

@@ -29,8 +29,15 @@ if __name__ == '__main__':
         logger = get_logger(MODEL_NAME)
         logger.info('Setting up training... ')
 
-        # n = 128
+        # n = 256
         n = None
+
+        lr = 1e-5
+
+        bsz = 32
+
+        n_ep = 8
+
         logger.info('Loading tokenizer & model... ')
         tokenizer = BertTokenizer.from_pretrained(HF_MODEL_NAME)
         mdl = AutoModelForSequenceClassification.from_pretrained(HF_MODEL_NAME, num_labels=len(sconfig('UTCD.aspects')))
@@ -41,9 +48,10 @@ if __name__ == '__main__':
         dnm = 'UTCD-in'  # concatenated 9 in-domain datasets in UTCD
         dset_args = dict(dataset_name=dnm, tokenizer=tokenizer, n_sample=n, shuffle_seed=seed)
         if NORMALIZE_ASPECT:
-            dset_args['normalize_aspect'] = seed
-        tr, vl = get_explicit_dataset(**dset_args)
-        logger.info(f'Loaded {logi(len(tr))} training samples, {logi(len(vl))} eval samples')
+            dset_args.update(dict(normalize_aspect=seed, splits=['train', 'eval', 'test']))
+        dsets = get_explicit_dataset(**dset_args)
+        tr, vl, ts = dsets['train'], dsets['eval'], dsets['test']
+        logger.info(f'Loaded #example {pl.i({k: len(v) for k, v in dsets.items()})}')
         transformers.set_seed(seed)
 
         sanity_check_speed = False
@@ -62,10 +70,6 @@ if __name__ == '__main__':
                 ret = {k: torch.stack([torch.tensor(b[k]) for b in batch]) for k in batch[0] if k != 'labels'}
                 ret['labels'] = torch.tensor([b['labels'] for b in batch])
                 return ret
-                # ic(len(batch))
-                # ic(type(batch))
-                # exit(1)
-                # return {k: torch.tensor(v) for k, v in batch.items()}
 
             dl = DataLoader(tr, batch_size=bsz, shuffle=True, pin_memory=True, collate_fn=collate_fn)
             optimizer = torch.optim.AdamW(mdl.parameters(), lr=lr, weight_decay=decay)
@@ -87,13 +91,8 @@ if __name__ == '__main__':
 
                         if torch.cuda.is_available():
                             inputs = {k: v.cuda() for k, v in inputs.items()}
-                            # ic(inputs.keys())
-                            # for k, v in inputs.items():
-                            #     ic(k, v, type(v))
-                            # inputs = {k: torch.tensor(v) for k, v in inputs.items()}
                         outputs = mdl(**inputs)
                         loss, logits = outputs.loss, outputs.logits.detach()
-                        # labels = inputs['labels'].detach()
                         loss_scalar = loss.detach().item()
 
                         loss.backward()
@@ -114,34 +113,41 @@ if __name__ == '__main__':
                     # save_strategy='no'
                 )
             else:
-                dir_nm = map_model_output_path(
+                path = map_model_output_path(
                     model_name=MODEL_NAME.replace(' ', '-'), mode='explicit',
                     sampling=None, normalize_aspect=NORMALIZE_ASPECT
                 )
-                mic(dir_nm)
 
                 with_tqdm = True
-                args = get_train_args(
+                args = dict(
                     model_name=BERT_MODEL_NAME,
-                    dir_name=dir_nm,
-                    per_device_eval_batch_size=128
+                    output_dir=path,
+                    learning_rate=lr,
+                    per_device_train_batch_size=bsz,
+                    per_device_eval_batch_size=bsz,
+                    num_train_epochs=n_ep,
+                    dataloader_num_workers=4
                 )
+                if NORMALIZE_ASPECT:
+                    args.update(dict(
+                        load_best_model_at_end=True,
+                        metric_for_best_model='eval_loss',
+                        greater_is_better=False
+                    ))
+                args = get_train_args(**args)
             trainer_args = dict(
                 model=mdl, args=args, train_dataset=tr, eval_dataset=vl, compute_metrics=compute_metrics
             )
-            trainer = ExplicitTrainer(name=f'{MODEL_NAME} Training', with_tqdm=with_tqdm, **trainer_args)
-            mic(trainer.log_output_dir)
-            # exit(1)
+            trainer = ExplicitTrainer(name=f'{MODEL_NAME} Train', with_tqdm=with_tqdm, **trainer_args)
             logger.info('Launching Training... ')
             if resume:
                 trainer.train(resume_from_checkpoint=resume)
             else:
                 trainer.train()
-            save_path = os_join(trainer.log_output_dir, 'trained')
+            save_path = os_join(trainer.args.output_dir, 'trained')
             trainer.save_model(save_path)
             tokenizer.save_pretrained(save_path)
-            mic(save_path)
-            mic(os.listdir(save_path))
+            logger.info(f'Tokenizer & Model saved to {pl.i(save_path)}')
     train()
     # dir_nm_ = '2022-05-16_21-25-30/checkpoint-274088'
     # ckpt_path = os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm_)
@@ -152,7 +158,7 @@ if __name__ == '__main__':
 
         # dir_nm = '2022-05-16_21-25-30/checkpoint-274088'
         dir_nm = '2022-05-19_23-33-50/checkpoint-411132'
-        path = os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm)
+        path = os_join(utcd_util.get_base_path(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm)
         mic(path)
         tokenizer = BertTokenizer.from_pretrained(HF_MODEL_NAME)  # TODO: should add eot token as in updated training
         # tokenizer = BertTokenizer.from_pretrained(path)
@@ -199,7 +205,7 @@ if __name__ == '__main__':
         """
         # dir_nm = '2022-05-19_23-33-50/checkpoint-411132'
         dir_nm = '2022-06-03_17-02-19/checkpoint-23988'
-        path = os_join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm)
+        path = os_join(utcd_util.get_base_path(), PROJ_DIR, MODEL_DIR, MODEL_NAME.replace(' ', '-'), dir_nm)
         tokenizer = BertTokenizer.from_pretrained(HF_MODEL_NAME)  # TODO: should add eot token as in updated training
         tokenizer.save_pretrained(path)
     # fix_save_tokenizer()

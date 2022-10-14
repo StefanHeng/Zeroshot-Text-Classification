@@ -65,14 +65,14 @@ class AttentionVisualizer:
         if dataset_name not in self.dataset_cache:
             self.dataset_cache[dataset_name] = utcd.get_dataset(dataset_name, split)
         label_options = sconfig(f'UTCD.datasets.{dataset_name}.splits.{split}.labels')
-        self.logger.info(f'Visualizing dataset {logi(dataset_name)} with label options {logi(label_options)}... ')
+        self.logger.info(f'Visualizing dataset {pl.i(dataset_name)} with label options {pl.i(label_options)}... ')
         if label is None:  # just assume not run on this text before
             label, args = self._get_pair(dataset_name, text, label_options)
         elif label not in self.model_cache[dataset_name][text]:
             args = self._get_pair(dataset_name, text, label)
         else:
             args = self.model_cache[dataset_name][text][label]
-        self.logger.info(f'Visualizing on {log_dict(text=text, label=label)} ... ')
+        self.logger.info(f'Visualizing on {pl.i(text=text, label=label)} ... ')
 
         if aggregate_attention:
             attn = args['attention']
@@ -109,7 +109,7 @@ class AttentionVisualizer:
                 b_strt = tids.tolist().index(1)
                 a = tuple(a[None, i] for a in attn)
                 self.model_cache[dataset_name][text][lb] = dict(attention=a, tokens=toks, sentence_b_start=b_strt)
-            scores = outputs.logits[:, 1]
+            scores = outputs.lg.its[:, 1]
             lb = label[scores.argmax()]  # pick the label with the highest score
             return lb, self.model_cache[dataset_name][text][lb]
         else:
@@ -123,8 +123,8 @@ class AttentionVisualizer:
 if __name__ == '__main__':
     import pickle
 
-    from icecream import ic
-    ic.lineWrapWidth = 5112
+    from stefutil import mic
+    mic.output_width = 512
 
     model_dir_nm = os_join('binary-bert-rand-vanilla-old-shuffle-05.03.22', 'rand')
     mdl_path = os_join(u.proj_path, u.model_dir, model_dir_nm)

@@ -56,12 +56,13 @@ def get_train_args(model_name: str, dir_name: str = None, **kwargs) -> TrainingA
     md_nm = model_name.replace(' ', '-')
     dir_nm = dir_name or f'{now(for_path=True)}_{md_nm}'
     args.update(dict(
-        output_dir=os_join(utcd_util.get_output_base(), u.proj_dir, u.model_dir, dir_nm),
+        output_dir=os_join(utcd_util.get_base_path(), u.proj_dir, u.model_dir, dir_nm),
         do_train=True, do_eval=True,
         evaluation_strategy='epoch',
         eval_accumulation_steps=128,  # Saves GPU memory
         warmup_ratio=1e-1,
         adam_epsilon=1e-6,
+        log_level='warning',
         logging_strategy='steps',
         logging_steps=1,
         save_strategy='epoch',

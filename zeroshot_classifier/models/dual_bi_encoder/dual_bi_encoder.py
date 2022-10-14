@@ -1,6 +1,7 @@
 import os
 import math
 import itertools
+from os.path import join as os_join
 from typing import List, Tuple, Dict, Iterable
 from collections import OrderedDict
 
@@ -15,7 +16,7 @@ from tqdm import tqdm
 from stefutil import *
 from zeroshot_classifier.util import *
 import zeroshot_classifier.util.utcd as utcd_util
-from zeroshot_classifier.util.load_data import get_data, encoder_cls_format, in_domain_data_path, out_of_domain_data_path
+from zeroshot_classifier.util.load_data import get_datasets, encoder_cls_format, in_domain_data_path, out_of_domain_data_path
 import zeroshot_classifier.models.dual_bi_encoder.jskit.encoders.bi as js_bi
 
 # Cannot import like this cos `bi.py` already imported, could cause duplicate `config_setup` call, loading 2 models
@@ -28,7 +29,7 @@ MD_NM_OUT = 'Dual Bi-encoder'
 def get_train_args() -> Dict:
     # Keep the same as in `zeroshot_classifier.models.bi-encoder`
     return dict(  # To override `jskit.encoders.bi` defaults
-        output_dir=os.path.join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME, now(for_path=True)),
+        output_dir=os_join(utcd_util.get_base_path(), PROJ_DIR, MODEL_DIR, MODEL_NAME, now(for_path=True)),
         train_batch_size=16,  # pe `bi-encoder.py` default
         eval_batch_size=32,
         learning_rate=2e-5,  # not specified by `bi-encoder.py`, go with default `SentenceTransformer`
@@ -74,9 +75,9 @@ def run_train(sampling: str = 'rand'):
     logger = get_logger(f'Train {MD_NM_OUT}')
     logger.info('Training launched... ')
 
-    d_dset = get_data(in_domain_data_path)
+    d_dset = get_datasets(in_domain_data_path)
     dnms = [dnm for dnm in d_dset.keys() if dnm != 'all']
-    logger.info(f'Gathering datasets: {logi(dnms)}... ')
+    logger.info(f'Gathering datasets: {pl.i(dnms)}... ')
     dset_tr = sum(
         (encoder_cls_format(
             d_dset[dnm]['train'], name=dnm, sampling=sampling, neg_sample_for_multi=True, show_warnings=False
@@ -91,7 +92,7 @@ def run_train(sampling: str = 'rand'):
 
     # n = 10
     # for c, t, l in zip(cands_tr[:n], conts_tr[:n], lbs_tr[:n]):  # Sanity check
-    #     ic(c, t, l)
+    #     mic(c, t, l)
 
     train_args = get_train_args()
     out_dir, bsz_tr, bsz_vl, lr, n_ep, decay, eps, warmup_ratio = (train_args[k] for k in (
@@ -120,8 +121,8 @@ def run_train(sampling: str = 'rand'):
         ('candidate size', sz_cand), ('context size', sz_cont)
     ])
     train_args |= dict(n_step=n_step, gradient_accumulation_steps=gas)
-    logger.info(f'Starting training on model {log_dict(d_model)} with training args: {log_dict(train_args)}, '
-                f'dataset size: {logi(n_tr)}... ')
+    logger.info(f'Starting training on model {pl.i(d_model)} with training args: {pl.i(train_args)}, '
+                f'dataset size: {pl.i(n_tr)}... ')
     model_ = zeroshot_classifier.models.dual_bi_encoder.jskit.encoders.utils.train.train_model(
         model_train=js_bi.model,
         tokenizer=js_bi.tokenizer,
@@ -133,7 +134,7 @@ def run_train(sampling: str = 'rand'):
 
 
 def load_model() -> Tuple[BertTokenizer, zeroshot_classifier.models.dual_bi_encoder.jskit.encoders.utils.models.BiEncoder]:
-    path = os.path.join(utcd_util.get_output_base(), PROJ_DIR, MODEL_DIR, MODEL_NAME, '2022-03-21_15-46-17')
+    path = os_join(utcd_util.get_base_path(), PROJ_DIR, MODEL_DIR, MODEL_NAME, '2022-03-21_15-46-17')
     js_bi.load_model(path)
     return js_bi.tokenizer, js_bi.model
 
@@ -211,11 +212,11 @@ def evaluate_trained(domain: str = 'in', candidate_batch_size: int = 256, contex
     tokenizer, model = load_model()
     model.eval()
     ew = EncoderWrapper(model, tokenizer)
-    d_dset = get_data(in_domain_data_path if domain == 'in' else out_of_domain_data_path)
+    d_dset = get_datasets(in_domain_data_path if domain == 'in' else out_of_domain_data_path)
     dataset_names = [dnm for dnm in d_dset.keys() if dnm != 'all']
 
     domain_str = f'{domain} domain'
-    output_dir = os.path.join(BASE_PATH, PROJ_DIR, 'evaluations', MODEL_NAME, f'{now(for_path=True)}, {domain_str}')
+    output_dir = os_join(BASE_PATH, PROJ_DIR, 'evaluations', MODEL_NAME, f'{now(for_path=True)}, {domain_str}')
     model_cnm = model.__class__.__qualname__
     d_model = OrderedDict([
         ('model name', model_cnm), ('trained #epoch', 3),
@@ -231,10 +232,10 @@ def evaluate_trained(domain: str = 'in', candidate_batch_size: int = 256, contex
     logger = get_logger(logger_name, typ='stdout')
     logger_fl = get_logger(
         f'{logger_name} file-write', typ='file-write',
-        file_path=os.path.join(output_dir, f'{logger_name}, {domain_str}.log')
+        file_path=os_join(output_dir, f'{logger_name}, {domain_str}.log')
     )
-    logger.info(f'Running evaluation {logi(domain_str)} on model {log_dict(d_model)}, with {log_dict(d_eval)}... ')
-    logger_fl.info(f'Running evaluation {domain_str} on model {log_dict_nc(d_model)}, with {log_dict_nc(d_eval)}... ')
+    logger.info(f'Running evaluation {pl.i(domain_str)} on model {pl.i(d_model)}, with {pl.i(d_eval)}... ')
+    logger_fl.info(f'Running evaluation {domain_str} on model {pl.nc(d_model)}, with {pl.nc(d_eval)}... ')
 
     for dnm in dataset_names:
         dset = d_dset[dnm]['test']
@@ -246,14 +247,14 @@ def evaluate_trained(domain: str = 'in', candidate_batch_size: int = 256, contex
         vects_lb = torch.cat([e for e in ew(labels, embed_type='candidate', batch_size=candidate_batch_size)[1]])
         lst_preds, lst_labels = [], []
         n, it = ew(list(txt2lbs.keys()), embed_type='candidate', return_text=True, batch_size=context_batch_size)
-        logger.info(f'Running evaluation on dataset {logi(dnm)}, with labels {logi(labels)}, '
-                    f'of {logi(len(txt2lbs))} unique texts in {logi(n)} batches... ')
+        logger.info(f'Running evaluation on dataset {pl.i(dnm)}, with labels {pl.i(labels)}, '
+                    f'of {pl.i(len(txt2lbs))} unique texts in {pl.i(n)} batches... ')
         logger_fl.info(
             f'Running evaluation on dataset {dnm}, with labels {labels}, '
             f'of {len(txt2lbs)} unique texts in {n} batches... ')
         for txts, vects_txt in tqdm(it, total=n):
-            logits = vects_txt @ vects_lb.t()
-            preds = logits.argmax(dim=-1)
+            lg.its = vects_txt @ vects_lb.t()
+            preds = lg.its.argmax(dim=-1)
 
             def get_true_label(pred, txt):
                 pos_lb_pool = txt2lbs[txt]
@@ -270,15 +271,15 @@ def evaluate_trained(domain: str = 'in', candidate_batch_size: int = 256, contex
         df = pd.DataFrame(
             classification_report(labels_all, preds_all, target_names=labels, output_dict=True)
         ).transpose()
-        path = os.path.join(output_dir, f'{dnm}.csv')
+        path = os_join(output_dir, f'{dnm}.csv')
         df.to_csv(path)
-        logger.info(f'Evaluation on {logi(dnm)} written to CSV at {logi(path)}')
+        logger.info(f'Evaluation on {pl.i(dnm)} written to CSV at {pl.i(path)}')
         logger_fl.info(f'Evaluation on {dnm} written to CSV at {path}')
 
 
 if __name__ == '__main__':
     import transformers
-    from icecream import ic
+    from icecream import mic
 
     seed = sconfig('random-seed')
     js_bi.set_seed(seed)
@@ -289,8 +290,8 @@ if __name__ == '__main__':
             config as bi_enc_config, set_seed,
             tokenizer, model
         )
-        ic(config_parser2dict(bi_enc_config))
-        ic(tokenizer, type(model))
+        mic(config_parser2dict(bi_enc_config))
+        mic(tokenizer, type(model))
     # import_check()
 
     # run_train()

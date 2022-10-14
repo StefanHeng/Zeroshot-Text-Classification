@@ -6,7 +6,7 @@ import gzip
 import random
 import itertools
 from os import listdir
-from os.path import isfile, join, basename
+from os.path import isfile, join as os_join, basename
 from zipfile import ZipFile
 from collections import Counter, defaultdict
 from typing import List, Tuple, Set, Dict, Union
@@ -22,20 +22,32 @@ from tqdm import tqdm
 from stefutil import *
 from zeroshot_classifier.util import *
 
+
 __all__ = [
     'in_domain_url', 'out_of_domain_url', 'in_domain_data_path', 'out_of_domain_data_path',
-    'get_data', 'sample_data',
+    'get_datasets', 'to_aspect_normalized_datasets',
     'nli_template', 'get_nli_data', 'binary_cls_format', 'nli_cls_format', 'encoder_cls_format', 'seq_cls_format',
     'binary_explicit_format'
 ]
+
+
+logger = get_logger('Load Data')
+
 
 in_domain_url = 'https://drive.google.com/uc?id=1V7IzdZ9HQbFUQz9NzBDjmqYBdPd9Yfe3'
 out_of_domain_url = 'https://drive.google.com/uc?id=1nd32_UrFbgoCgH4bDtFFD_YFZhzcts3x'
 dataset_path = './dataset'
 in_domain_data_path = './dataset/in-domain'
 out_of_domain_data_path = './dataset/out-of-domain'
-nlp = spacy.load("en_core_web_md")
-nlp.disable_pipes(['tagger', 'parser', 'attribute_ruler', 'lemmatizer', 'ner'])
+ASPECT_NORM_DIRNM = 'aspect-normalized'
+
+
+def _get_nlp():
+    if not hasattr(_get_nlp, 'nlp'):
+        _get_nlp.nlp = spacy.load("en_core_web_md")
+        _get_nlp.nlp.disable_pipes(['tagger', 'parser', 'attribute_ruler', 'lemmatizer', 'ner'])
+    return _get_nlp.nlp
+
 
 category_map = {
     "ag_news": "category",
@@ -59,11 +71,14 @@ category_map = {
 }
 
 
-def get_data(
-        path: str, n_sample: int = None, normalize_aspect: Union[bool, int] = False, domain: str = 'in'
-) -> Dict[str, Dict]:
+Dataset = Dict[str, List[str]]  # text => labels associated with that text
+SplitDataset = Dict[str, Union[Dataset, List[str], str]]  # train & test splits + metadata including labels & aspect
+
+
+def get_datasets(
+        domain: str = 'in', n_sample: int = None, normalize_aspect: Union[bool, int] = False
+) -> [str, SplitDataset]:
     """
-    :param path: File system path to folder of UTCD dataset
     :param n_sample: If given, a random sample of the entire dataset is selected
         Intended for debugging
     :param normalize_aspect: If true, # of training samples for each aspect is normalized
@@ -72,55 +87,79 @@ def get_data(
     :param domain: Needed for aspect normalization
         Intended for training directly on out-of-domain data, see `zeroshot_classifier/models/bert.py`
     """
-    logger = get_logger('Get UTCD data')
+    path = os_join(u.proj_path, in_domain_data_path if domain == 'in' else out_of_domain_data_path)
     if not os.path.exists(path):
-        logger.info('Loading data from Google Drive...')
+        logger.info(f'Downloading {pl.i(domain)} domain data from GDrive to {pl.i(path)}...')
         download_data(path)
-    paths = [join(path, f) for f in listdir(path) if isfile(join(path, f)) and f.endswith('.json')]
-    data = dict()
-    for path in paths:
-        dataset_name = basename(path).split('.')[0]
-        logger.info(f'Loading dataset {logi(dataset_name)}...')
-        dset = json.load(open(path))
-
-        if n_sample:
-            assert set(dset.keys()) == {'train', 'test', 'aspect', 'labels'}  # sanity check
-            for k in ['train', 'test']:
-                txt2lb: Dict[str, List[str]] = dset[k]
-                txts = np.empty(sconfig(f'UTCD.datasets.{dataset_name}.splits.{k}.n_text'), dtype=object)
-                for i, t in enumerate(txt2lb.keys()):
-                    txts[i] = t
-                txts = np.random.permutation(txts)[:n_sample]
-                dset[k] = {t: txt2lb[t] for t in txts}
-        data[dataset_name] = dset
+    datasets = None
+    _keys = {'train', 'test', 'aspect', 'labels'}
     if normalize_aspect:
-        seed = None if isinstance(normalize_aspect, bool) else normalize_aspect
-        data = sample_data(data, seed=seed, domain=domain)
-    return data
+        if isinstance(normalize_aspect, int):
+            assert normalize_aspect == sconfig('random-seed')
+        path = os_join(path, ASPECT_NORM_DIRNM)
+        if not os.path.exists(path):
+            datasets = save_aspect_normalized_datasets(domain=domain)
+        _keys.add('eval')
+    if not datasets:
+        paths = [os_join(path, f) for f in listdir(path) if isfile(os_join(path, f)) and f.endswith('.json')]
+        datasets = dict()
+        it = tqdm(paths, desc='Loading JSON datasets')
+        for path in it:
+            dataset_name = basename(path).split('.')[0]
+            it.set_postfix(dataset=pl.i(dataset_name))
+            dset = json.load(open(path))
+            dset: SplitDataset
+
+            assert set(dset.keys()) == _keys  # sanity check
+            datasets[dataset_name] = dset
+
+    splits = ['train', 'eval', 'test'] if normalize_aspect else ['train', 'test']
+    if n_sample:
+        for dnm, dsets in datasets.items():
+            for sp in splits:
+                dset = dsets[sp]
+                n = len(dset) if normalize_aspect else sconfig(f'UTCD.datasets.{dnm}.splits.{sp}.n_text')
+                if n < n_sample:
+                    break
+
+                if normalize_aspect:
+                    txts = list(dset.keys())
+                    txts = random.sample(txts, n_sample)
+                else:  # TODO: support eval set
+                    txts = np.empty(n, dtype=object)
+                    for i, t in enumerate(dset.keys()):
+                        txts[i] = t
+                    txts = np.random.permutation(txts)[:n_sample]
+                dsets[sp] = {t: dset[t] for t in txts}
+    counts = {dnm: {sp: len(dsets[sp]) for sp in splits} for dnm, dsets in datasets.items()}
+    logger.info(f'Datasets loaded w/ {pl.i(counts)}')
+    return datasets
 
 
-def sample_data(data: Dict[str, Dict], seed: int = None, domain: str = 'in') -> Dict[str, Dict]:
+def to_aspect_normalized_datasets(
+        data: Dict[str, SplitDataset], seed: int = None, domain: str = 'in'
+) -> Dict[str, SplitDataset]:
     """
     Sample the `train` split of the 9 in-domain datasets so that each `aspect` contains same # of samples
 
     Maintain class distribution
     """
-    logger = get_logger('Normalize Aspect')
     if seed:
         random.seed(seed)
     aspect2n_txt = defaultdict(int)
     for dnm, d_dset in sconfig('UTCD.datasets').items():
         if d_dset['domain'] == domain:
             aspect2n_txt[d_dset['aspect']] += d_dset['splits']['train']['n_text']
+    logger.info(f'Aspect distribution: {pl.i(aspect2n_txt)}')
     asp_min = min(aspect2n_txt, key=aspect2n_txt.get)
-    logger.info(f'Normalizing each aspect to ~{logi(aspect2n_txt[asp_min])} samples... ')
+    logger.info(f'Normalizing each aspect to ~{pl.i(aspect2n_txt[asp_min])} samples... ')
 
-    def sample_dset(d: Dict[str, List[str]], dnm_: str, n_text: int) -> Dict[str, List[str]]:
+    def normalize_single(dset_: Dataset, dnm_: str, n_text: int) -> Dataset:
         """
         Sample texts from text-labels pairs to `n_sample` while maintaining class distribution
         """
         cls2txt: Dict[str, Set[str]] = defaultdict(set)
-        for txt, lbs in d.items():
+        for txt, lbs in dset_.items():
             for lb in lbs:  # the same text may be added to multiple classes & hence sampled multiple times, see below
                 cls2txt[lb].add(txt)
         cls2count = {cls: len(txts) for cls, txts in cls2txt.items()}
@@ -134,7 +173,7 @@ def sample_data(data: Dict[str, Dict], seed: int = None, domain: str = 'in') -> 
                 txts = random.sample(cls2txt[cls], to_sample)
                 for t in txts:
                     if t not in out:  # ensure no-duplication in # samples added, since multi-label
-                        out[t] = d[t]
+                        out[t] = dset_[t]
                         to_sample -= 1
                         cls2txt[cls].remove(t)
         return out
@@ -143,12 +182,70 @@ def sample_data(data: Dict[str, Dict], seed: int = None, domain: str = 'in') -> 
         asp = sconfig(f'UTCD.datasets.{dnm}.aspect')
         if asp != asp_min:
             n_normed = sconfig(f'UTCD.datasets.{dnm}.splits.train.n_text') * aspect2n_txt[asp_min] / aspect2n_txt[asp]
-            d_dset['train'] = sample_dset(d_dset['train'], dnm, n_text=round(n_normed))
+            d_dset['train'] = normalize_single(d_dset['train'], dnm, n_text=round(n_normed))
     dnm2count = defaultdict(dict)
     for dnm, d_dset in data.items():
         dnm2count[sconfig(f'UTCD.datasets.{dnm}.aspect')][dnm] = len(d_dset['train'])
-    logger.info(f'Dataset counts after normalization: {log_dict_pg(dnm2count)}')
+    logger.info(f'Dataset counts after normalization: {pl.fmt(dnm2count)}')
     return data
+
+
+def dataset2train_eval_split(dataset: Dataset, eval_ratio: float = 0.1, seed: int = None) -> Dict[str, Dataset]:
+    """
+    Split training set into train & eval set, try to maintain class distribution in both sets
+    """
+    if seed:
+        random.seed(seed)
+    # just like in `to_aspect_normalized_datasets::normalize_single`; the same text may be added to multiple classes
+    cls2txt: Dict[str, Set[str]] = defaultdict(set)
+    for txt, lbs in dataset.items():
+        for lb in lbs:
+            cls2txt[lb].add(txt)
+    tr, vl = dict(), dict()
+    txts_added = set()  # so that the same text is not added to both train & eval set
+    for cls, txts in cls2txt.items():
+        n_eval = max(round(len(txts) * eval_ratio), 1)  # at least 1 sample in eval for each class
+        txts_vl = random.sample(txts, n_eval)
+        txts_tr = txts - set(txts_vl)
+
+        for t in txts_tr:
+            if t not in txts_added:
+                tr[t] = dataset[t]
+                txts_added.add(t)
+        for t in txts_vl:
+            if t not in txts_added:
+                vl[t] = dataset[t]
+                txts_added.add(t)
+    assert len(tr) + len(vl) == len(dataset)  # sanity check
+
+    def dset2meta(dset: Dataset):
+        labels = set().union(*dataset.values())
+        return {'#text': len(dset), '#label': len(labels), 'labels': list(labels)}
+    logger.info(f'Training set after split: {pl.i(dset2meta(tr))}')
+    logger.info(f'Eval set after split: {pl.i(dset2meta(vl))}')
+    return dict(train=tr, eval=vl)
+
+
+def save_aspect_normalized_datasets(domain: str = 'in'):
+    seed = sconfig('random-seed')
+    path = in_domain_data_path if domain == 'in' else out_of_domain_data_path
+    dsets = get_datasets(domain=domain)
+    dsets = to_aspect_normalized_datasets(dsets, seed=seed, domain=domain)
+
+    out_path = os.path.join(path, ASPECT_NORM_DIRNM)
+    os.makedirs(out_path, exist_ok=True)
+
+    ret = dict()
+    for dnm, dsets_ in dsets.items():
+        dsets__ = dataset2train_eval_split(dsets_.pop('train'), seed=seed)
+        dsets__.update(dsets_)
+        mic(dsets__.keys())
+        path_out = os.path.join(out_path, f'{dnm}.json')
+        logger.info(f'Saving normalized {pl.i(dnm)} dataset to {pl.i(path_out)}... ')
+        with open(path, 'w') as f:
+            json.dump(dsets__, f)
+        ret[dnm] = dsets__
+    return ret
 
 
 def download_data(path, file=None):
@@ -158,9 +255,9 @@ def download_data(path, file=None):
     elif path == out_of_domain_data_path:
         file = './dataset/out-domain.zip'
         gdown.download(out_of_domain_url, file, quiet=False)
-    with ZipFile(file, "r") as zip:
-        zip.extractall(dataset_path)
-        zip.close()
+    with ZipFile(file, "r") as zfl:
+        zfl.extractall(dataset_path)
+        zfl.close()
 
 
 def get_nli_data():
@@ -183,40 +280,44 @@ def get_nli_data():
     return train_samples, dev_samples
 
 
-def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanilla'):
+def binary_cls_format(
+        dataset: SplitDataset = None, sampling='rand', split: str = 'train', mode='vanilla'
+):
     ca.check_mismatch('Data Negative Sampling', sampling, ['rand', 'vect'])
-    logger = get_logger('Binary CLS format')
     examples = []
-    aspect = data['aspect']
-    if train:
+    aspect = dataset['aspect']
+    if split in ['train', 'eval']:
         aspect_token, sep_token = None, None
         label_un_modified = mode != 'implicit'
         ca(training_strategy=mode)
         if mode in ['vanilla', 'implicit-on-text-encode-aspect', 'implicit-on-text-encode-sep', 'explicit']:
-            label_list = data['labels']
+            label_list = dataset['labels']
             if mode == 'implicit-on-text-encode-aspect':
                 aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')[aspect]
             elif mode == 'implicit-on-text-encode-sep':
                 sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
         elif mode == 'implicit':
-            label_list = ['{} {}'.format(label, data['aspect']) for label in data['labels']]
+            label_list = ['{} {}'.format(label, dataset['aspect']) for label in dataset['labels']]
         else:
-            raise NotImplementedError(f'{logi(mode)} not supported yet')
+            raise NotImplementedError(f'{pl.i(mode)} not supported yet')
 
-        example_list = [x for x in data['train'].keys()]
+        example_list = [x for x in dataset[split].keys()]
 
+        vects, label_vectors = None, None
         if sampling == 'vect':
+            nlp = _get_nlp()
             label_vectors = {label: nlp(label) for label in label_list}
             start = time.time()
             vects = list(nlp.pipe(example_list, n_process=4, batch_size=128))
             print('Time Elapsed {} ms'.format((time.time() - start) * 1000))
 
-        logger.info(f'Generating {logi(name)} examples')
-        for i, (text, labels) in enumerate(tqdm(data['train'].items(), desc=name)):
+        # it = tqdm(dataset[split].items(), desc=f'Formatting {pl.i(dataset_name)}-{pl.i(split)} to Binary CLS')
+        # for i, (text, labels) in enumerate(it):
+        for i, (text, labels) in enumerate(dataset[split].items()):
             if label_un_modified:
                 true_labels = labels
             else:
-                true_labels = ['{} {}'.format(label, data['aspect']) for label in labels]
+                true_labels = ['{} {}'.format(label, dataset['aspect']) for label in labels]
             other_labels = [label for label in label_list if label not in true_labels]
 
             if mode == 'implicit-on-text-encode-aspect':
@@ -249,10 +350,10 @@ def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanill
                 elif len(other_labels) > 0:
                     examples.append(InputExample(texts=[text, other_labels[0]], label=float(0)))
 
-    else:
+    else:  # test split
         aspect_token = sconfig('training.implicit-on-text.encode-aspect.aspect2aspect-token')[aspect]
         sep_token = sconfig('training.implicit-on-text.encode-sep.aspect-sep-token')
-        for text, labels in data['test'].items():
+        for text, labels in dataset['test'].items():
             for label in labels:
                 if mode in ['vanilla', 'explicit']:
                     pass
@@ -263,7 +364,7 @@ def binary_cls_format(data, name=None, sampling='rand', train=True, mode='vanill
                 elif mode == 'implicit-on-text-encode-sep':
                     text = f'{aspect} {sep_token} {text}'
                 else:
-                    raise NotImplementedError(f'{logi(mode)} not supported yet')
+                    raise NotImplementedError(f'{pl.i(mode)} not supported yet')
                 examples.append(InputExample(texts=[text, label], label=1))
     return examples
 
@@ -283,7 +384,9 @@ def nli_cls_format(data, name=None, sampling='rand', train=True):
         label_list = data['labels']
         example_list = [x for x in data['train'].keys()]
 
+        vects, label_vectors = None, None
         if sampling == 'vect':
+            nlp = _get_nlp()
             label_vectors = {label: nlp(label) for label in label_list}
             start = time.time()
             vects = list(nlp.pipe(example_list, n_process=4, batch_size=128))
@@ -345,10 +448,12 @@ def encoder_cls_format(
     """
     examples = []
     if train:
+        nlp = _get_nlp()
         label_list = list(dict.fromkeys([example[1] for example in arr]))
         label_vectors = {label: nlp(label) for label in label_list}
         example_list = [x[0] for x in arr]
 
+        vects = None
         if sampling == 'vect':
             start = time.time()
             vects = list(nlp.pipe(example_list, n_process=4, batch_size=128))
@@ -357,11 +462,11 @@ def encoder_cls_format(
         # count instances
         count = Counter(example_list)
         has_multi_label = any((c > 1) for c in count.values())
+        txt2lbs = None
         if has_multi_label:  # Potentially all valid labels for each text
             arr_ = sorted(arr)  # map from unique text to all possible labels
             txt2lbs = {k: set(lb for txt, lb in v) for k, v in itertools.groupby(arr_, key=lambda pair: pair[0])}
-            logger = get_logger('Preprocess multi-label negative sampling')
-            logger.info(f'Generating examples for dataset {logi(name)}, with labels {logi(label_list)}... ')
+            logger.info(f'Generating examples for dataset {pl.i(name)}, with labels {pl.i(label_list)}... ')
         print('Generating {} examples'.format(name))
         for i, element in enumerate(tqdm(arr)):
             true_label = element[1]
@@ -390,8 +495,8 @@ def encoder_cls_format(
                         neg_label = list(neg_pool)[0]
                     examples.extend([neg_sample2label(neg_label), neg_sample2label(neg_label)])
                     if show_warnings:
-                        logger.warning(f'{log_s(warn_name, c="y", bold=True)}: # negative labels for text less '
-                                       f'than {2}: {log_dict(text=txt, pos_labels=txt2lbs[txt], neg_labels=neg_pool)}')
+                        logger.warning(f'{pl.s(warn_name, c="y", bold=True)}: # negative labels for text less '
+                                       f'than {2}: {pl.i(text=txt, pos_labels=txt2lbs[txt], neg_labels=neg_pool)}')
                 else:
                     examples.extend([neg_sample2label(neg_label) for neg_label in random.sample(neg_pool, k=2)])
             else:
@@ -491,26 +596,20 @@ def binary_explicit_format(dataset):
 
 
 if __name__ == '__main__':
-    from icecream import ic
-
-    ic.lineWrapWidth = 512
+    mic.output_width = 512
 
     random.seed(sconfig('random-seed'))
 
     def check_sampling():
-        data = get_data(in_domain_data_path)
-        data = sample_data(data)
+        data = get_datasets(in_domain_data_path)
+        data = to_aspect_normalized_datasets(data)
         for dnm, d_dset in data.items():
-            ic(dnm, len(d_dset['train']))
+            mic(dnm, len(d_dset['train']))
             c = Counter()
             for txt, lbs in d_dset['train'].items():
                 c.update(lbs)
-            ic(c, len(c))
+            mic(c, len(c))
     # check_sampling()
 
-
-    def save_aspect_norm_dset():
-        seed = sconfig('random-seed')
-        data = get_data(in_domain_data_path, normalize_aspect=seed, domain='in')
-        mic(type(data))
-    save_aspect_norm_dset()
+    save_aspect_normalized_datasets(domain='in')
+    save_aspect_normalized_datasets(domain='out')
