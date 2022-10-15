@@ -151,6 +151,7 @@ if __name__ == '__main__':
         os.makedirs(out_path, exist_ok=True)
 
         data = get_datasets(domain=domain)
+
         model_path = os_join(get_base_path(), u.proj_dir, u.model_dir, model_dir_nm)
         logger.info(f'Loading model from path {pl.i(model_path)}... ')
         model = BinaryBertCrossEncoder(model_path)  # load model
@@ -163,6 +164,8 @@ if __name__ == '__main__':
         dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if filt(d_dset, domain)]
 
         for dnm in dataset_names:  # loop through all datasets
+            if dnm != 'consumer_finance':
+                continue
             dset = data[dnm]
             pairs, aspect = dset[split], dset['aspect']
             d_dset = sconfig(f'UTCD.datasets.{dnm}.splits.{split}')
