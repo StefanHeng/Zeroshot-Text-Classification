@@ -1,5 +1,5 @@
-import os
 import csv
+from os.path import join as os_join
 from typing import List, Tuple, Dict, Union
 from collections import OrderedDict
 
@@ -57,7 +57,7 @@ def write_csv_train_strat_in_col(
         rows.append(row)
 
     fnm = f'Model classification accuracy by dataset & training strategy, {now(for_path=True)}.csv'
-    fnm = os.path.join(get_chore_base(), 'table', fnm)
+    fnm = os_join(get_chore_base(), 'table', fnm)
     with open(fnm, 'w') as f:
         writer = csv.writer(f)
         for r in rows:
@@ -76,8 +76,8 @@ def write_csv_train_strat_in_row(
     ]
     setups = [
         ('binary-bert', 'rand'),
-        ('bi-encoder', 'rand'),
-        ('gpt2-nvidia', 'NA'),
+        # ('bi-encoder', 'rand'),
+        # ('gpt2-nvidia', 'NA'),
     ]
     for model_name, samp_strat in setups:
         for train_strat in train_strategies:
@@ -86,7 +86,8 @@ def write_csv_train_strat_in_row(
             accs = []
             for dnm in dnms:
                 dnm2csv_path = get_dnm2csv_path_fn(
-                    model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config
+                    model_name, samp_strat, train_strat, domain=domain, chore_config=chore_config,
+                    train_description='8ep'
                 )
                 acc: Union[float, None] = dataset_acc(dnm, dnm2csv_path=dnm2csv_path, suppress_not_found=True)
                 accs.append(acc)
@@ -106,8 +107,9 @@ def write_csv_train_strat_in_row(
                 row.append(None)
             rows.append(row)
     domain_str = 'in-domain' if domain == 'in' else 'out-of-domain'
-    fnm = f'{now(for_path=True)}_{domain_str.capitalize()} classification accuracy by dataset & training strategy.csv'
-    fnm = os.path.join(get_chore_base(), 'table', fnm)
+    date = now(fmt='short-date')
+    fnm = f'{date}_{domain_str.capitalize()} classification accuracy by dataset & training strategy.csv'
+    fnm = os_join(get_chore_base(), 'table', fnm)
     with open(fnm, 'w') as f:
         writer = csv.writer(f)
         for r in rows:
@@ -125,7 +127,7 @@ if __name__ == '__main__':
     #     def print_single(with_color=True):
     #         if with_color:
     #             perfs = (f'      {k*100:>4.1f}' for k in (prec, rec, f1))
-    #             print(f'{dnm_:>24}{asp:>10}' + ''.join(logi(p) for p in perfs))
+    #             print(f'{dnm_:>24}{asp:>10}' + ''.join(pl.i(p) for p in perfs))
     #         else:
     #             print(f'{dnm_:>24}{asp:>10}{prec:>{n_metric}}{rec:>{n_metric}}{f1:>{n_metric}}')
     #
@@ -154,8 +156,8 @@ if __name__ == '__main__':
                 accs.append(acc)
 
             avg = round(sum(accs) / len(accs), 1)
-            accs = ' '.join([f'{log_s("&", c="m")} {logi(round(a, 1))}' for a in accs])
-            return f'{model_name} & {training_strategy} {accs} & {logi(avg)} \\\\'
+            accs = ' '.join([f'{pl.s("&", c="m")} {pl.i(round(a, 1))}' for a in accs])
+            return f'{model_name} & {training_strategy} {accs} & {pl.i(avg)} \\\\'
 
         print(get_single('bert-seq-cls', 'NA', 'vanilla'))
         for md_nm in ['binary-bert', 'bi-encoder', 'gpt2-nvidia']:
@@ -168,7 +170,7 @@ if __name__ == '__main__':
     # def get_csv(domain: str = 'in'):
     #     assert domain in ['in', 'out']
     #     dnms = IN_DATASET_NAMES if domain == 'in' else OUT_DATASET_NAMES
-    #     with open(os.path.join(
+    #     with open(os_join(
     #             PATH_BASE_CHORE, 'table', f'in-domain classification accuracy, {now(for_path=True)}.csv'
     #     ), 'w') as f:
     #         writer = csv.writer(f)
@@ -240,7 +242,7 @@ if __name__ == '__main__':
                 rows.append(get_row(*setup, training_strategy))
 
         fnm = f'{training_strategy.capitalize()} classification accuracy, {now(for_path=True)}.csv'
-        fnm = os.path.join(get_chore_base(), 'table', fnm)
+        fnm = os_join(get_chore_base(), 'table', fnm)
         with open(fnm, 'w') as f:
             writer = csv.writer(f)
             for r in rows:
@@ -251,15 +253,11 @@ if __name__ == '__main__':
 
     def write(domain: str = 'in'):
         ttrial = 'asp-norm'
-        chore_config = ChoreConfig(
-            train_trial=ttrial,
-            new_bert_eot=False,
-            # gpt2_embed_sim=True
-        )
+        chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
         tr_strats = (
             'vanilla',
-            # 'implicit',
-            # 'implicit-on-text-encode-aspect',
+            'implicit',
+            'implicit-on-text-encode-aspect',
             'implicit-on-text-encode-sep',
             'explicit'
         )
@@ -274,17 +272,20 @@ if __name__ == '__main__':
         def prettier_acc(a: float) -> str:
             return f'{a * 100:4.1f}' if bool(a) else None
 
-        md_nm = 'bert-seq-cls'
+        # md_nm = 'bert-seq-cls'
+        md_nm = 'binary-bert'
         if md_nm == 'bert-seq-cls':
             samp_strat, train_strat = 'NA', 'vanilla'
         elif md_nm == 'gpt2-nvidia':
-            samp_strat = 'NA'
-            train_strat = 'implicit'
+            samp_strat, train_strat = 'NA', 'implicit'
         else:
             raise NotImplementedError(f'{md_nm}')
         mic(md_nm, domain)
-        dnms = cconfig(f'domain2dataset-names-all.{domain}')
-        dnm2csv_path = get_dnm2csv_path_fn(md_nm, samp_strat, train_strat, domain=domain, chore_config=cconfig)
+
+        ttrial = 'asp-norm'
+        chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
+        dnms = chore_config(f'domain2dataset-names-all.{domain}')
+        dnm2csv_path = get_dnm2csv_path_fn(md_nm, samp_strat, train_strat, domain=domain, chore_config=chore_config)
         accs = []
         for dnm in dnms:
             acc = dataset_acc(dnm, dnm2csv_path=dnm2csv_path)

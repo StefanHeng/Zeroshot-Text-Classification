@@ -1,7 +1,7 @@
-from collections.abc import Sized
 from os.path import join as os_join
 from typing import List, Tuple, Dict, Callable, Union
 from collections import OrderedDict
+from collections.abc import Sized
 
 import numpy as np
 import pandas as pd
@@ -162,8 +162,6 @@ def plot_setups_acc(
 if __name__ == '__main__':
     import os
 
-    from icecream import ic
-
     def pick_cmap():
         cmaps = [
             'mako',
@@ -245,8 +243,8 @@ if __name__ == '__main__':
                 ('binary-bert', 'vanilla'),
                 ('binary-bert', 'implicit'),
                 ('binary-bert', 'implicit-on-text-encode-aspect'),
-                # ('binary-bert', 'implicit-on-text-encode-sep'),
-                ('binary-bert', 'explicit'),
+                ('binary-bert', 'implicit-on-text-encode-sep'),
+                ('binary-bert', 'explicit')
             ]
             setups = [
                 dict(model_name=md_nm, sampling_strategy='rand', training_strategy=tr_strat, train_description='8ep')
@@ -280,7 +278,7 @@ if __name__ == '__main__':
                     (md_nm, tr_strat, 'explicit')
                 ]
                 setups = [dict(zip(['model_name', 'sampling_strategy', 'training_strategy'], s)) for s in _setups]
-        # ic(setups)
+        # mic(setups)
 
         ttrial = 'asp-norm'
         chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
@@ -295,8 +293,8 @@ if __name__ == '__main__':
             # ylim=(0, 100),
             title=title, chore_config=chore_config
         )
-    plot_one_model(domain='in')
-    # plot_one_model(domain='out')
+    # plot_one_model(domain='in')
+    plot_one_model(domain='out')
 
     def plot_intent_only(domain: str = 'in'):
         setups = [

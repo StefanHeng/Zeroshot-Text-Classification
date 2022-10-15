@@ -1,5 +1,6 @@
 import os
 import math
+from os.path import join as os_join
 from copy import deepcopy
 from typing import Tuple, Dict, Iterable, Callable, Any, Union
 from collections import OrderedDict
@@ -14,7 +15,7 @@ __all__ = ['get_chore_base', 'ChoreConfig', 'cconfig', 'get_dnm2csv_path_fn', 'p
 
 
 def get_chore_base() -> str:
-    return os.path.join(BASE_PATH, PROJ_DIR)
+    return u.proj_path
 
 
 class ChoreConfig:
@@ -48,17 +49,36 @@ class ChoreConfig:
                 # (model name, sampling strategy, training strategy, eval dataset domain, #epochs)
                 ('binary-bert', 'rand', 'vanilla', 'in', '8ep'):
                     ['2022-10-11_00-57-59_Binary-BERT-vanilla-rand-aspect-norm', '22-10-13_in-domain'],
+                ('binary-bert', 'rand', 'vanilla', 'out', '8ep'):
+                    ['2022-10-11_00-57-59_Binary-BERT-vanilla-rand-aspect-norm', '22-10-13_out-of-domain'],
                 ('binary-bert', 'rand', 'implicit', 'in', '8ep'):
                     ['2022-10-12_01-13-02_Binary-BERT-implicit-rand-aspect-norm', '22-10-13_in-domain'],
+                ('binary-bert', 'rand', 'implicit', 'out', '8ep'):
+                    ['2022-10-12_01-13-02_Binary-BERT-implicit-rand-aspect-norm', '22-10-13_out-of-domain'],
                 ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in', '8ep'):
                     [
                         '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
                         '22-10-13_in-domain'
                     ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '8ep'):
+                    [
+                        '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
+                        '22-10-13_out-of-domain'
+                    ],
                 ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '8ep'):
-                    [],
+                    [
+                        '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
+                        '22-10-14_in-domain'
+                    ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '8ep'):
+                    [
+                        '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
+                        '22-10-14_out-of-domain'
+                    ],
                 ('binary-bert', 'rand', 'explicit', 'in', '8ep'):
-                    ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-13_in-domain']
+                    ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-13_in-domain'],
+                ('binary-bert', 'rand', 'explicit', 'out', '8ep'):
+                    ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-14_out-of-domain']
             }
         else:
 
@@ -281,10 +301,9 @@ def get_dnm2csv_path_fn(
         paths += _paths
     else:
         paths.append(_paths)
-    path = os.path.join(*paths)
-    mic(path, os.listdir(path))
-    assert os.path.exists(path)
-    return lambda d_nm: os.path.join(path, f'{d_nm}.csv')
+    path = os_join(*paths)
+    assert os.path.exists(path)  # sanity check
+    return lambda d_nm: os_join(path, f'{d_nm}.csv')
 
 
 def prettier_setup(
@@ -348,8 +367,6 @@ def dataset_acc(
 
 
 if __name__ == '__main__':
-    from icecream import ic
+    mic.output_width = 512
 
-    ic.lineWrapWidth = 150
-
-    ic(cconfig)
+    mic(cconfig)
