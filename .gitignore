@@ -16,6 +16,7 @@ pretrained-models/
 trained-models/
 obsolete/
 zeroshot_classifier/baseline/bi-encoder_ori.py
+auth/
 
 
 # Byte-compiled / optimized / DLL files

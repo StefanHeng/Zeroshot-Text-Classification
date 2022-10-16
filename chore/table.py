@@ -75,8 +75,8 @@ def write_csv_train_strat_in_row(
         ['architecture', 'training strategy\\dataset name'] + dnms + ['avg']
     ]
     setups = [
-        ('binary-bert', 'rand'),
-        # ('bi-encoder', 'rand'),
+        # ('binary-bert', 'rand'),
+        ('bi-encoder', 'rand'),
         # ('gpt2-nvidia', 'NA'),
     ]
     for model_name, samp_strat in setups:
@@ -256,9 +256,9 @@ if __name__ == '__main__':
         chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
         tr_strats = (
             'vanilla',
-            'implicit',
-            'implicit-on-text-encode-aspect',
-            'implicit-on-text-encode-sep',
+            # 'implicit',
+            # 'implicit-on-text-encode-aspect',
+            # 'implicit-on-text-encode-sep',
             'explicit'
         )
         write_csv_train_strat_in_row(

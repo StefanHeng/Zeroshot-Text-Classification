@@ -55,30 +55,41 @@ class ChoreConfig:
                     ['2022-10-12_01-13-02_Binary-BERT-implicit-rand-aspect-norm', '22-10-13_in-domain'],
                 ('binary-bert', 'rand', 'implicit', 'out', '8ep'):
                     ['2022-10-12_01-13-02_Binary-BERT-implicit-rand-aspect-norm', '22-10-13_out-of-domain'],
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in', '8ep'):
-                    [
-                        '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
-                        '22-10-13_in-domain'
-                    ],
-                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '8ep'):
-                    [
-                        '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
-                        '22-10-13_out-of-domain'
-                    ],
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '8ep'):
-                    [
-                        '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
-                        '22-10-14_in-domain'
-                    ],
-                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '8ep'):
-                    [
-                        '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
-                        '22-10-14_out-of-domain'
-                    ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'in', '8ep'): [
+                    '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
+                    '22-10-13_in-domain'
+                ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-aspect', 'out', '8ep'): [
+                    '2022-10-12_01-16-59_Binary-BERT-implicit-on-text-encode-aspect-rand-aspect-norm',
+                    '22-10-13_out-of-domain'
+                ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'in', '8ep'): [
+                    '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
+                    '22-10-14_in-domain'
+                ],
+                ('binary-bert', 'rand', 'implicit-on-text-encode-sep', 'out', '8ep'): [
+                    '2022-10-12_01-21-08_Binary-BERT-implicit-on-text-encode-sep-rand-aspect-norm',
+                    '22-10-14_out-of-domain'
+                ],
                 ('binary-bert', 'rand', 'explicit', 'in', '8ep'):
                     ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-13_in-domain'],
                 ('binary-bert', 'rand', 'explicit', 'out', '8ep'):
-                    ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-14_out-of-domain']
+                    ['2022-10-13_11-56-36_Binary-BERT-explicit-rand-aspect-norm', '22-10-14_out-of-domain'],
+
+                ('bi-encoder', 'rand', 'vanilla', 'in', '8ep'): [
+                    '2022-10-09_09-10-01_Bi-Encoder-vanilla-rand-aspect-norm', '22-10-14_in-domain'  # le 2e-5
+                    # '2022-10-11_02-41-38_Bi-Encoder-vanilla-rand-aspect-norm', '22-10-15_in-domain'  # lr 1e-5
+                ],
+                ('bi-encoder', 'rand', 'vanilla', 'out', '8ep'): [
+                    '2022-10-09_09-10-01_Bi-Encoder-vanilla-rand-aspect-norm', '22-10-14_out-of-domain'
+                    # '2022-10-11_02-41-38_Bi-Encoder-vanilla-rand-aspect-norm', '22-10-15_out-of-domain'
+                ],
+                ('bi-encoder', 'rand', 'explicit', 'in', '8ep'): [
+                    '2022-10-14_07-20-07_Bi-Encoder-explicit-rand-aspect-norm', '22-10-15_in-domain'
+                ],
+                ('bi-encoder', 'rand', 'explicit', 'out', '8ep'): [
+                    '2022-10-14_07-20-07_Bi-Encoder-explicit-rand-aspect-norm', '22-10-15_out-of-domain'
+                ]
             }
         else:
 
