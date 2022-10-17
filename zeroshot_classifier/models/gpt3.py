@@ -2,6 +2,7 @@ import re
 import os
 import json
 import time
+from typing import Dict, Any
 
 import requests
 from os.path import join as os_join
@@ -57,7 +58,6 @@ class ApiCaller:
                 assert res.status_code == 429  # Too many request, retry
             time.sleep(1)
             res = _call()
-        # assert res.status_code == 200, f'API call failed: {res.status_code}'
 
         res = json.loads(res.text)
         # mic(res)
@@ -153,27 +153,33 @@ def evaluate(model: str = 'text-ada-001', domain: str = 'in'):
         if dnm != 'emotion':  # TODO: debugging
             continue
         dset = get_dataset(dnm, splits='test')['test']
-        # mic(dset)
         pm = PromptMap(dataset_name=dnm)
         label_options = [lb.lower() for lb in pm.labels]
         lb2id = {lb: idx for idx, lb in enumerate(label_options)}
 
         n_dset = len(dset)
         trues, preds = np.empty(n_dset, dtype=int), np.empty(n_dset, dtype=int)
-        for i, e in enumerate(tqdm(dset, desc=f'Evaluating {pl.i(dnm)}')):
+
+        def _call(e: Dict[str, Any]):
             txt, lbs = e['text'], e['labels']
-            # mic(txt, [pm.labels[idx] for idx in lbs])
             prompt = pm(txt)
-            # mic(prompt)
             answer = ac(prompt)  # TODO: maybe GPT3 generates multiple answers?
-            # mic(answer)
             answer = answer.lower()
 
             if answer not in label_options:
                 logger_fl.warning(f'Generated {pl.i(answer)}, not one of label options')
-                preds[i], trues[i] = -1, lbs[0]
+                return -1, lbs[0]
             else:
-                preds[i] = trues[i] = lb2id[answer]
+                return lb2id[answer], lb2id[answer]
+
+        concurrent = False
+        if concurrent:  # concurrency doesn't seem to help
+            conc_map(_call, dset, with_tqdm=dict(desc=f'Evaluating {pl.i(dnm)}', chunksize=32), mode='process')
+        else:
+            it = tqdm(dset, desc=f'Evaluating {pl.i(dnm)}')
+            for idx, elm in enumerate(it):
+                preds[idx], trues[idx] = _call(elm)
+
         args = dict(
             labels=[-1, *range(len(label_options))], target_names=['Label not in dataset', *label_options],
             zero_division=0, output_dict=True
