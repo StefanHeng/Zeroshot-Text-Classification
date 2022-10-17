@@ -113,6 +113,17 @@ class ChoreConfig:
                 ('bi-encoder', 'rand', 'explicit', 'out', '8ep'): [
                     '2022-10-14_07-20-07_Bi-Encoder-explicit-rand-aspect-norm', '22-10-15_out-of-domain'
                 ],
+
+                ('gpt2-nvidia', 'NA', 'vanilla', 'in', '8ep'): [
+                    # 0.01 warmup
+                    # '2022-10-11_23-44-51_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm', '22-10-14_in-domain',
+                    # 0.1 warmup, better ood performance
+                    '2022-10-14_07-45-31_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm', '22-10-16_in-domain'
+                ],
+                ('gpt2-nvidia', 'NA', 'vanilla', 'out', '8ep'): [
+                    # '2022-10-11_23-44-51_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm', '22-10-14_out-of-domain',
+                    '2022-10-14_07-45-31_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm', '22-10-16_out-of-domain'
+                ],
             }
         else:
 
