@@ -16,18 +16,21 @@ if __name__ == '__main__':
         'Content-Type': 'application/json',
         'OpenAI-Organization': org
     }
-    # payload = dict(
-    #     name='get_latest_day',
-    #     nd=user_id,
-    #     ctx=dict(
-    #         before_date=before_date,
-    #         show_report=1  # this must be 1 or otherwise the response will be empty
-    #     )
-    # )
 
-    model = 'text-ada-001'  # fastest
-    # model = 'text-davinci-002'  # most powerful
-    res = requests.get(url='https://api.openai.com/v1/models', headers=headers)
-    mic(res)
-    res = json.loads(res.text)
-    mic(res)
+    def check_api():
+        res = requests.get(url='https://api.openai.com/v1/models', headers=headers)
+        mic(res)
+        res = json.loads(res.text)
+        mic(res)
+    # check_api()
+
+    def try_completion():
+        model = 'text-ada-001'  # fastest
+        # model = 'text-davinci-002'  # most powerful
+
+        payload = dict(
+            model=model,
+            prompt="Say this is a test",
+            max_tokens=6,  # Generate w/ greedy decoding
+        )
+    try_completion()

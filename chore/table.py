@@ -256,9 +256,9 @@ if __name__ == '__main__':
         chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
         tr_strats = (
             'vanilla',
-            # 'implicit',
-            # 'implicit-on-text-encode-aspect',
-            # 'implicit-on-text-encode-sep',
+            'implicit',
+            'implicit-on-text-encode-aspect',
+            'implicit-on-text-encode-sep',
             'explicit'
         )
         write_csv_train_strat_in_row(
