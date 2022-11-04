@@ -3,11 +3,10 @@ import re
 import os
 import json
 import time
-from typing import List, Dict, Any
-from argparse import ArgumentParser
-
 import requests
 from os.path import join as os_join
+from typing import List, Dict, Any, Union
+from argparse import ArgumentParser
 
 import numpy as np
 import pandas as pd
@@ -18,6 +17,9 @@ from stefutil import *
 from zeroshot_classifier.util import *
 import zeroshot_classifier.util.utcd as utcd_util
 from zeroshot_classifier.preprocess import get_dataset
+
+
+__all__ = ['ApiCaller', 'PromptMap', 'evaluate']
 
 
 logger = get_logger('GPT3')
@@ -31,8 +33,9 @@ class ApiCaller:
     url = 'https://api.openai.com/v1/completions'
 
     with open(os_join(u.proj_path, 'auth', 'open-ai.json')) as f:
-        d = json.load(f)
-        api_key, org = d['api-key'], d['organization']
+        auth = json.load(f)
+        # api_key, org = auth['api-key'], auth['organization']
+        api_key, org = auth['api-key-chris'], auth['organization']
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {api_key}',
@@ -174,20 +177,15 @@ class _EvalSingle:
             return -1, lbs[0]
 
 
-def evaluate(model: str = 'text-ada-001', domain: str = 'in', dataset_name: str = 'all', concurrent: bool = False):
+def evaluate(
+        model: str = 'text-ada-001', domain: str = 'in', dataset_name: str = 'all', concurrent: bool = False,
+        subsample: Union[bool, int] = False, subsample_seed: int = 77
+):
     ac = ApiCaller(model=model)
 
-    all_dset = dataset_name == 'all'
-    if not all_dset:
-        _dom = sconfig(f'UTCD.datasets.{dataset_name}.domain')
-        if domain is not None:
-            domain = _dom
-        else:
-            assert domain == _dom
-    if all_dset:
-        dataset_names = utcd_util.get_dataset_names(domain)
-    else:
-        dataset_names = [dataset_name]
+    if dataset_name == 'all' and subsample:
+        raise NotImplementedError('Subsampling intended for single dataset')
+    dataset_names = utcd_util.get_eval_dataset_names(domain=domain, dataset_name=dataset_name)
 
     output_dir_nm = f'{now(for_path=True)}_Zeroshot-GPT3-{model}'
     output_path = os_join(u.eval_path, output_dir_nm, domain2eval_dir_nm(domain))
@@ -195,13 +193,16 @@ def evaluate(model: str = 'text-ada-001', domain: str = 'in', dataset_name: str 
 
     log_fnm = f'{now(for_path=True)}_GPT3_{model}_{domain}_{dataset_name}_Eval'
     logger_fl = get_logger('GPT3 Eval', kind='file-write', file_path=os_join(output_path, f'{log_fnm}.log'))
-
     d_log = dict(model_name=model, domain=domain, dataset_names=dataset_names, output_path=output_path)
     logger.info(f'Evaluating GPT3 model w/ {pl.i(d_log)}... ')
     logger_fl.info(f'Evaluating GPT3 model w/ {d_log}... ')
 
     for dnm in dataset_names:
-        dset = get_dataset(dnm, splits='test')['test']
+        if subsample:
+            n_tgt = subsample if isinstance(subsample, int) else 5000
+            dset = utcd_util.subsample_dataset(dataset_name=dnm, split='test', n_tgt=n_tgt, seed=subsample_seed)
+        else:
+            dset = get_dataset(dnm, splits='test')['test']
         pm = PromptMap(dataset_name=dnm, logger_fl=logger_fl)
         label_options = [lb.lower() for lb in pm.labels]
         lb2id = {lb: idx for idx, lb in enumerate(label_options)}
@@ -235,8 +236,8 @@ if __name__ == '__main__':
     mic.output_width = 256
 
     with open(os_join(u.proj_path, 'auth', 'open-ai.json')) as f:
-        d = json.load(f)
-        api_key, org = d['api-key'], d['organization']
+        auth = json.load(f)
+        api_key, org = auth['api-key'], auth['organization']
 
     headers = {
         'Authorization': f'Bearer {api_key}',
@@ -272,7 +273,7 @@ if __name__ == '__main__':
     # evaluate(model='text-davinci-002', domain='in', dataset_name='emotion')
 
     # evaluate(model='text-curie-001', domain='in', dataset_name='finance_sentiment', concurrent=True)
-    evaluate(model='text-curie-001', domain='in', dataset_name='banking77', concurrent=True)
+    # evaluate(model='text-curie-001', domain='in', dataset_name='banking77', concurrent=True, subsample=True)
     # evaluate(model='text-davinci-002', domain='out', dataset_name='finance_sentiment')
     # evaluate(model='text-davinci-002', domain='out', dataset_name='consumer_finance')
     # evaluate(model='text-davinci-002', domain='out', dataset_name='amazon_polarity', concurrent=True)
@@ -293,9 +294,16 @@ if __name__ == '__main__':
         parser.add_argument('--concurrent', type=bool, default=False, help="""
             Make GPT3 completion requests concurrently
         """)
+        parser.add_argument('--subsample', type=int, default=5000, help="""
+            Total #sample to subsample from the dataset
+        """)
+        parser.add_argument('--subsample_seed', type=int, default=77)
         return parser.parse_args()
 
     def command_prompt():
         args = parse_args()
-        evaluate(model=args.model, dataset_name=args.dataset, domain=args.domain, concurrent=args.concurrent)
-    # command_prompt()
+        evaluate(
+            model=args.model, dataset_name=args.dataset, domain=args.domain, concurrent=args.concurrent,
+            subsample=args.subsample, subsample_seed=args.subsample_seed
+        )
+    command_prompt()

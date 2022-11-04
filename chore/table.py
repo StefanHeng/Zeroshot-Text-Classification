@@ -76,8 +76,8 @@ def write_csv_train_strat_in_row(
     ]
     setups = [
         # ('binary-bert', 'rand'),
-        # ('bi-encoder', 'rand'),
-        ('gpt2-nvidia', 'NA'),
+        ('bi-encoder', 'rand'),
+        # ('gpt2-nvidia', 'NA'),
     ]
     for model_name, samp_strat in setups:
         for train_strat in train_strategies:
@@ -256,17 +256,17 @@ if __name__ == '__main__':
         chore_config = ChoreConfig(train_trial=ttrial, after_best_val=True)
         tr_strats = (
             'vanilla',
-            # 'implicit',
-            # 'implicit-on-text-encode-aspect',
-            # 'implicit-on-text-encode-sep',
-            # 'explicit'
+            'implicit',
+            'implicit-on-text-encode-aspect',
+            'implicit-on-text-encode-sep',
+            'explicit'
         )
         write_csv_train_strat_in_row(
             train_strategies=tr_strats, chore_config=chore_config, domain=domain,
             pretty=False
         )
-    write('in')
-    # write('out')
+    # write('in')
+    write('out')
 
     def get_one_model_numbers(domain: str = 'in'):
         def prettier_acc(a: float) -> str:

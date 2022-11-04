@@ -27,6 +27,7 @@ import gdown
 
 from stefutil import *
 from zeroshot_classifier.util.util import *
+from zeroshot_classifier.util import load_data
 from zeroshot_classifier.util.data_path import BASE_PATH, PROJ_DIR, DSET_DIR
 
 
@@ -61,6 +62,29 @@ def get_utcd_from_gdrive(domain: str = 'in'):
         zip_.close()
 
 
+def dataset2hf_dataset(
+        dataset: load_data.Dataset = None, labels: List[str] = None, multi_label: bool = False
+) -> Dataset:
+    # Map to **local** integer labels; index is label per `lbs_` ordering, same with `datasets.ClassLabel`
+    lb2id = {lb: i for i, lb in enumerate(labels)}
+    # if not multi-label, `Sequence` of single element
+    df = pd.DataFrame([dict(text=txt, labels=[lb2id[lb] for lb in lbs]) for txt, lbs in dataset.items()])
+    length = -1 if multi_label else 1
+    lbs = Sequence(feature=ClassLabel(names=labels), length=length)
+    feats = Features(text=Value(dtype='string'), labels=lbs)
+    return Dataset.from_pandas(df, features=feats)
+
+
+def subsample_dataset(dataset_name: str = None, split: str = 'train', n_tgt: int = 5000, seed: int = None) -> Dataset:
+    d = sconfig(f'UTCD.datasets.{dataset_name}')
+    domain = d['domain']
+    dset = load_data.get_datasets(domain=domain, dataset_names=dataset_name)[dataset_name][split]
+
+    d = d.get(f'splits.{split}')
+    dset = load_data.subsample_dataset(dataset=dset, n_src=d['n_pair'], n_tgt=n_tgt, seed=seed)
+    return dataset2hf_dataset(dataset=dset, labels=d['labels'], multi_label=d['multi_label'])
+
+
 def process_utcd_dataset(domain: str = 'in', join=False):
     """
     :param domain: One of [`in`, `out`]
@@ -89,20 +113,13 @@ def process_utcd_dataset(domain: str = 'in', join=False):
         with open(path_) as f:
             dsets_: Dict = json.load(f)
 
-        def json2dset(split: str, dset: Dict[str, List[str]]) -> Union[Dataset, pd.DataFrame]:
+        def json2dset(split: str, dset: load_data.Dataset) -> Union[Dataset, pd.DataFrame]:
             assert split in ['train', 'test']
             if join:  # will convert to global integers later, see below
                 return pd.DataFrame([dict(text=txt, labels=lbs) for txt, lbs in dset.items()])
-            else:  # TODO: didn't test
-                lbs_: List[str] = sconfig(f'UTCD.datasets.{dnm}.splits.{split}.labels')
-                # Map to **local** integer labels; index is label per `lbs_` ordering, same with `datasets.ClassLabel`
-                lb2id = {lb: i for i, lb in enumerate(lbs_)}
-                # if not multi-label, `Sequence` of single element
-                df = pd.DataFrame([dict(text=txt, labels=[lb2id[lb] for lb in lbs]) for txt, lbs in dset.items()])
-                length = -1 if sconfig(f'UTCD.datasets.{dnm}.splits.{split}.multi_label') else 1
-                lbs = Sequence(feature=ClassLabel(names=lbs_), length=length)
-                feats = Features(text=Value(dtype='string'), labels=lbs)
-                return Dataset.from_pandas(df, features=feats)
+            else:
+                d = sconfig(f'UTCD.datasets.{dnm}.splits.{split}')
+                return dataset2hf_dataset(dataset=dset, labels=d['labels'], multi_label=d['multi_label'])
         return DatasetDict(
             {key: json2dset(key, dset) for key, dset in dsets_.items() if key not in ['labels', 'aspect']}
         )
@@ -182,6 +199,17 @@ def get_utcd_info() -> pd.DataFrame:
 
 def get_dataset_names(domain: str = 'in'):
     return [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
+
+
+def get_eval_dataset_names(domain: str = 'in', dataset_name: str = 'all') -> List[str]:
+    all_dset = dataset_name == 'all'
+    if not all_dset:
+        _dom = sconfig(f'UTCD.datasets.{dataset_name}.domain')
+        if domain is not None:
+            domain = _dom
+        else:
+            assert domain == _dom
+    return get_dataset_names(domain) if all_dset else [dataset_name]
 
 
 UtcdDatasetNames = namedtuple('UtcdDatasetNames', ['in_domain', 'out_of_domain'])
