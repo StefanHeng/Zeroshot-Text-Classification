@@ -90,7 +90,9 @@ def get_datasets(
         Intended for training directly on out-of-domain data, see `zeroshot_classifier/models/bert.py`
     :param dataset_names: If given, only load the specified datasets
     """
-    path = os_join(u.proj_path, in_domain_data_path if domain == 'in' else out_of_domain_data_path)
+    domain_paths = in_domain_data_path if domain == 'in' else out_of_domain_data_path
+    domain_paths = [d for d in domain_paths.split(os.sep) if d != '.']
+    path = os_join(u.proj_path, *domain_paths)
     if not os.path.exists(path):
         logger.info(f'Downloading {pl.i(domain)} domain data from GDrive to {pl.i(path)}...')
         download_data(path)
