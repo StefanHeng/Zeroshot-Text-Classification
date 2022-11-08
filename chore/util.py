@@ -411,7 +411,31 @@ def dataset_acc(
         return dict(zip(dataset_names, accs)) if return_type == 'dict' else accs
 
 
+def setup2accs(dir_name: str = None, domain_dir_nm: str = None) -> Dict[str, float]:
+    path = os_join(u.eval_path, dir_name, domain_dir_nm)
+    dnms = [dnm for dnm, d in sconfig('UTCD.datasets').items() if d['domain'] == 'out']  # TODO
+    return dataset_acc(dataset_names=dnms, dnm2csv_path=lambda dnm: os_join(path, f'{dnm}.csv'))
+
+
 if __name__ == '__main__':
     mic.output_width = 512
 
-    mic(cconfig)
+    # mic(cconfig)
+
+    def check_setups():
+        setups = [
+            '2022-11-06_14-17-06_Binary-BERT_vanilla_rand_asp-norm_{a=3e-5}',
+            '2022-11-06_14-22-17_Binary-BERT_vanilla_rand_asp-norm_{a=4e-5}',
+            '2022-11-06_15-34-21_Bi-Encoder_vanilla_rand_asp-norm_{a=3e-5}',
+            '2022-11-06_15-37-20_Bi-Encoder_vanilla_rand_asp-norm_{a=4e-5}'
+        ]
+
+        rows = []
+        for s in setups:
+            accs = setup2accs(s, '22-11-07_out-of-domain')
+            accs['avg'] = sum(accs.values()) / len(accs)
+            accs = {k: round(v * 100, 2) for k, v in accs.items()}
+            rows.append(dict(dnm=s, **accs))
+        df = pd.DataFrame(rows)
+        mic(df)
+    check_setups()
