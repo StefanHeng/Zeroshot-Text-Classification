@@ -158,10 +158,12 @@ def subsample_dataset(dataset: Dataset = None, n_src: int = None, n_tgt: int = N
     d_log = {'#source': n_src, '#target': n_tgt, 'subsample-ratio': f'{round(ratio * 100, 3)}%'}
     logger.info(f'Subsampling dataset w/ {pl.i(d_log)}... ')
 
-    cls2txt: Dict[str, Set[str]] = defaultdict(set)
+    cls2txt = defaultdict(set)
     for txt, lbs in dataset.items():
         for lb in lbs:  # the same text may be added to multiple classes & hence sampled multiple times, see below
             cls2txt[lb].add(txt)
+    # so that seed ensures reproducibility; TODO: too slow?
+    cls2txt = {cls: sorted(txts) for cls, txts in cls2txt.items()}
     cls2count = {cls: len(txts) for cls, txts in cls2txt.items()}
     # normalize by #pair instead of #text for keeping output #text close to `n_sample`
     cls2count = {cls: round(c * ratio) for cls, c in cls2count.items()}  # goal count for output
@@ -269,15 +271,24 @@ def save_aspect_normalized_datasets(domain: str = 'in'):
     return ret
 
 
-def download_data(path, file=None):
-    if path == in_domain_data_path:
+def download_data(path):
+    if 'in-domain' in path:
         file = './dataset/in-domain.zip'
-        gdown.download(in_domain_url, file, quiet=False)
-    elif path == out_of_domain_data_path:
+        url = in_domain_url
+    else:
+        assert 'out-of-domain' in path
         file = './dataset/out-domain.zip'
-        gdown.download(out_of_domain_url, file, quiet=False)
+        url = out_of_domain_url
+    fl_paths = [d for d in file.split(os.sep) if d != '.']
+    fl_path = os.path.join(u.proj_path, *fl_paths)
+    os.makedirs(os.path.dirname(fl_path), exist_ok=True)
+    gdown.download(url, fl_path, quiet=False)
+
     with ZipFile(file, "r") as zfl:
-        zfl.extractall(dataset_path)
+        dset_paths = [d for d in dataset_path.split(os.sep) if d != '.']
+        path = os_join(u.proj_path, *dset_paths)
+        os.makedirs(path, exist_ok=True)
+        zfl.extractall(path)
         zfl.close()
 
 

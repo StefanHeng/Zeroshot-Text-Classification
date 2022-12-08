@@ -423,16 +423,87 @@ if __name__ == '__main__':
     # mic(cconfig)
 
     def check_setups():
+        # setups = [
+        #     '2022-11-06_14-17-06_Binary-BERT_vanilla_rand_asp-norm_{a=3e-5}',
+        #     '2022-11-06_14-22-17_Binary-BERT_vanilla_rand_asp-norm_{a=4e-5}',
+        #     '2022-11-06_15-34-21_Bi-Encoder_vanilla_rand_asp-norm_{a=3e-5}',
+        #     '2022-11-06_15-37-20_Bi-Encoder_vanilla_rand_asp-norm_{a=4e-5}'
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-08_20-20-53_Binary-BERT_vanilla_rand_asp-norm_{a=1e-5_m=a}', domain_dir_nm='22-11-13_out-of-domain'),
+        #     dict(dir_name='2022-11-11_21-29-22_Binary-BERT_vanilla_rand_asp-norm_{a=2e-5_m=a}', domain_dir_nm='22-11-13_out-of-domain'),
+        #     dict(dir_name='2022-11-11_21-34-47_Binary-BERT_vanilla_rand_asp-norm_{a=3e-5_m=a}', domain_dir_nm='22-11-14_out-of-domain'),
+        #     dict(dir_name='2022-11-11_21-36-29_Binary-BERT_vanilla_rand_asp-norm_{a=4e-5_m=a}', domain_dir_nm='22-11-14_out-of-domain')
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-14_15-43-37_Bi-Encoder_vanilla_rand_asp-norm_{a=1e-5_m=a}', domain_dir_nm='22-11-16_out-of-domain'),
+        #     dict(dir_name='2022-11-15_11-00-49_Bi-Encoder_vanilla_rand_asp-norm_{a=2e-5_m=a}', domain_dir_nm='22-11-16_out-of-domain'),
+        #     dict(dir_name='2022-11-15_12-23-27_Bi-Encoder_vanilla_rand_asp-norm_{a=3e-5_m=a}', domain_dir_nm='22-11-16_out-of-domain'),
+        #     dict(dir_name='2022-11-15_12-25-42_Bi-Encoder_vanilla_rand_asp-norm_{a=4e-5_m=a}', domain_dir_nm='22-11-16_out-of-domain')
+        # ]
+        # setups = [
+        #     # dict(dir_name='2022-11-16_16-40-22_Binary-BERT_vanilla_rand_asp-norm_{a=2e-5}', domain_dir_nm='22-11-17_out-of-domain'),
+        #     dict(dir_name='2022-11-17_14-51-46_Binary-BERT_implicit_rand_asp-norm_{a=1e-5}', domain_dir_nm='22-11-18_out-of-domain'),
+        #     dict(dir_name='2022-11-17_14-58-43_Binary-BERT_implicit_rand_asp-norm_{a=2e-5}', domain_dir_nm='22-11-18_out-of-domain'),
+        #     dict(dir_name='2022-11-17_15-02-28_Binary-BERT_implicit_rand_asp-norm_{a=3e-5}', domain_dir_nm='22-11-18_out-of-domain'),
+        #     dict(dir_name='2022-11-17_15-07-09_Binary-BERT_implicit_rand_asp-norm_{a=4e-5}', domain_dir_nm='22-11-18_out-of-domain')
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-18_18-39-05_Binary-BERT_{md=i-o-t-e-a, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-20_out-of-domain'),
+        #     dict(dir_name='2022-11-18_18-43-37_Binary-BERT_{md=i-o-t-e-a, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-20_out-of-domain'),
+        #     dict(dir_name='2022-11-18_18-46-31_Binary-BERT_{md=i-o-t-e-a, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-20_out-of-domain'),
+        #     dict(dir_name='2022-11-18_18-49-47_Binary-BERT_{md=imp-sep, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-20_out-of-domain'),
+        #     dict(dir_name='2022-11-18_18-51-58_Binary-BERT_{md=imp-sep, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-20_out-of-domain'),
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-20_21-06-56_Binary-BERT_{md=imp-sep, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-21_out-of-domain'),
+        #     dict(dir_name='2022-11-20_21-14-11_Bi-Encoder_{md=imp, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-21_out-of-domain'),
+        #     dict(dir_name='2022-11-20_21-15-41_Bi-Encoder_{md=imp, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-21_out-of-domain'),
+        #     dict(dir_name='2022-11-20_21-17-50_Bi-Encoder_{md=imp, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-21_out-of-domain'),
+        #     dict(dir_name='2022-11-20_21-20-23_Bi-Encoder_{md=imp-asp, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-21_out-of-domain'),
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-22_01-26-10_Binary-BERT_{md=exp, sp=r, na=T}_{a=1e-5}', domain_dir_nm='22-11-23_out-of-domain'),
+        #     dict(dir_name='2022-11-22_01-27-20_Binary-BERT_{md=exp, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-23_out-of-domain'),
+        #     dict(dir_name='2022-11-22_01-28-56_Binary-BERT_{md=exp, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-23_out-of-domain'),
+        #     dict(dir_name='2022-11-22_01-30-18_Binary-BERT_{md=exp, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-23_out-of-domain'),
+        #     dict(dir_name='2022-11-21_19-04-32_Bi-Encoder_{md=imp-asp, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-23_out-of-domain'),
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-24_00-04-11_Bi-Encoder_{md=imp-asp, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-24_out-of-domain'),
+        #     dict(dir_name='2022-11-24_00-06-55_Bi-Encoder_{md=imp-sep, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-24_out-of-domain'),
+        #     dict(dir_name='2022-11-24_00-08-00_Bi-Encoder_{md=imp-sep, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-24_out-of-domain'),
+        #     dict(dir_name='2022-11-24_00-09-33_Bi-Encoder_{md=imp-sep, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-24_out-of-domain')
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-25_22-01-07_Bi-Encoder_{md=exp, sp=r, na=T}_{a=1e-5}', domain_dir_nm='22-11-26_out-of-domain'),
+        #     dict(dir_name='2022-11-25_22-02-38_Bi-Encoder_{md=exp, sp=r, na=T}_{a=2e-5}', domain_dir_nm='22-11-26_out-of-domain'),
+        #     dict(dir_name='2022-11-25_22-04-46_Bi-Encoder_{md=exp, sp=r, na=T}_{a=3e-5}', domain_dir_nm='22-11-26_out-of-domain'),
+        #     dict(dir_name='2022-11-25_22-07-17_Bi-Encoder_{md=exp, sp=r, na=T}_{a=4e-5}', domain_dir_nm='22-11-27_out-of-domain')
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-11-29_12-12-56_NVIDIA-GPT2_{md=van, na=T}_{a=1e-05}', domain_dir_nm='22-12-01_out-of-domain'),
+        #     dict(dir_name='2022-11-29_19-15-44_NVIDIA-GPT2_{md=van, na=T}_{a=2e-05}', domain_dir_nm='22-12-01_out-of-domain'),
+        #     dict(dir_name='2022-11-29_19-37-13_NVIDIA-GPT2_{md=van, na=T}_{a=3e-05}', domain_dir_nm='22-12-01_out-of-domain'),
+        #     dict(dir_name='2022-11-29_19-43-32_NVIDIA-GPT2_{md=van, na=T}_{a=4e-05}', domain_dir_nm='22-12-01_out-of-domain')
+        # ]
+        # setups = [
+        #     dict(dir_name='2022-12-03_10-43-47_NVIDIA-GPT2_{md=imp, na=T}_{a=1e-05}', domain_dir_nm='22-12-05_out-of-domain'),
+        #     dict(dir_name='2022-12-03_14-47-52_NVIDIA-GPT2_{md=imp, na=T}_{a=2e-05}', domain_dir_nm='22-12-05_out-of-domain'),
+        #     dict(dir_name='2022-12-03_15-03-14_NVIDIA-GPT2_{md=imp, na=T}_{a=3e-05}', domain_dir_nm='22-12-05_out-of-domain'),
+        #     dict(dir_name='2022-12-02_21-33-18_NVIDIA-GPT2_{md=imp, na=T}_{a=4e-05}', domain_dir_nm='22-12-05_out-of-domain')
+        # ]
         setups = [
-            '2022-11-06_14-17-06_Binary-BERT_vanilla_rand_asp-norm_{a=3e-5}',
-            '2022-11-06_14-22-17_Binary-BERT_vanilla_rand_asp-norm_{a=4e-5}',
-            '2022-11-06_15-34-21_Bi-Encoder_vanilla_rand_asp-norm_{a=3e-5}',
-            '2022-11-06_15-37-20_Bi-Encoder_vanilla_rand_asp-norm_{a=4e-5}'
+            dict(dir_name='2022-12-05_16-13-20_NVIDIA-GPT2_{md=exp, na=T}_{a=1e-05}', domain_dir_nm='22-12-07_out-of-domain'),
+            dict(dir_name='2022-12-05_16-25-57_NVIDIA-GPT2_{md=exp, na=T}_{a=2e-05}', domain_dir_nm='22-12-07_out-of-domain'),
+            dict(dir_name='2022-12-05_16-52-24_NVIDIA-GPT2_{md=exp, na=T}_{a=3e-05}', domain_dir_nm='22-12-07_out-of-domain'),
+            dict(dir_name='2022-12-05_17-12-33_NVIDIA-GPT2_{md=exp, na=T}_{a=4e-05}', domain_dir_nm='22-12-07_out-of-domain')
         ]
 
         rows = []
         for s in setups:
-            accs = setup2accs(s, '22-11-07_out-of-domain')
+            # accs = setup2accs(dir_name=s, domain_dir_nm='22-11-07_out-of-domain')
+            accs = setup2accs(**s)
             accs['avg'] = sum(accs.values()) / len(accs)
             accs = {k: round(v * 100, 2) for k, v in accs.items()}
             rows.append(dict(dnm=s, **accs))

@@ -13,9 +13,7 @@ from tqdm import tqdm
 
 from stefutil import *
 from zeroshot_classifier.util import *
-from zeroshot_classifier.util.load_data import (
-    get_datasets, binary_cls_format, in_domain_data_path, out_of_domain_data_path
-)
+from zeroshot_classifier.util.load_data import get_datasets, binary_cls_format
 import zeroshot_classifier.util.utcd as utcd_util
 from zeroshot_classifier.models.architecture import BiEncoder
 
@@ -69,6 +67,9 @@ if __name__ == "__main__":
         n = None
         # n = 64
 
+        # best_metric = 'accuracy'
+        best_metric = 'loss'
+
         output_path = map_model_output_path(
             model_name=MODEL_NAME.replace(' ', '-'), output_path=output_path, output_dir=output_dir,
             mode=mode, sampling=sampling, normalize_aspect=NORMALIZE_ASPECT
@@ -94,6 +95,8 @@ if __name__ == "__main__":
 
         # seq length for consistency w/ `binary_bert` & `sgd`
         d_log = dict(model_init=model_init)
+        if mode == 'explicit':
+            assert model_init != HF_MODEL_NAME  # sanity check
         if model_init != HF_MODEL_NAME:
             # loading from explicit pre-training local weights,
             # the classification head would be ignored for classifying 3 classes
@@ -101,7 +104,7 @@ if __name__ == "__main__":
             d_log['files'] = os.listdir(model_init)
         logger.info(f'Loading model with {pl.i(d_log)}...')
         logger_fl.info(f'Loading model with {pl.nc(d_log)}...')
-        word_embedding_model = models.Transformer(model_init, max_seq_length=512)
+        word_embedding_model = models.Transformer(model_init, max_seq_length=512, tokenizer_args=dict(use_fast=False))
         add_tok_arg = utcd_util.get_add_special_tokens_args(word_embedding_model.tokenizer, train_strategy=mode)
         if add_tok_arg:
             logger.info(f'Adding special tokens {pl.i(add_tok_arg)} to tokenizer... ')
@@ -116,6 +119,7 @@ if __name__ == "__main__":
 
         random.seed(seed)
         random.shuffle(train)
+        # train, val = train[:128], train[:128]  # TODO: debugging
         train_dataloader = DataLoader(train, shuffle=True, batch_size=bsz)
         val_dataloader = DataLoader(val, shuffle=False, batch_size=bsz)
         train_loss = losses.CosineSimilarityLoss(model)
@@ -123,7 +127,7 @@ if __name__ == "__main__":
 
         d_log = {
             '#data': len(train), 'learning_rate': lr, 'batch size': bsz, 'epochs': n_ep, 'warmup steps': warmup_steps,
-            'output path': output_path
+            'best_model_metric': best_metric, 'output path': output_path
         }
         logger.info(f'Training w/ {pl.i(d_log)}... ')
         logger_fl.info(f'Training w/ {pl.nc(d_log)}... ')
@@ -136,7 +140,8 @@ if __name__ == "__main__":
             optimizer_params=dict(lr=lr),
             warmup_steps=warmup_steps,
             output_path=output_path,
-            logger_fl=logger_fl
+            logger_fl=logger_fl,
+            best_model_metric=best_metric
         )
     elif cmd == 'test':
         split = 'test'
