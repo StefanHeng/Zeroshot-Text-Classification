@@ -11,6 +11,7 @@ import itertools
 from os.path import join as os_join
 from typing import List, Tuple, Dict, Union, Any
 from warnings import warn
+from argparse import ArgumentParser
 from collections import defaultdict, OrderedDict
 
 import numpy as np
@@ -125,7 +126,6 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
         self.templates = sconfig('baselines.gpt2-nvidia.templates')
         # Mapping from dataset name to label for non-UTCD cases
-        # self.cache: Dict[Tuple[str, str], Dict] = ZsGPT2Tokenizer.Cache(self)
         self.cache = ZsGPT2Tokenizer.Cache(self)
         self.cache_utcd = None
 
@@ -378,9 +378,6 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
 
     def forward(self, dataset_id=None, **kwargs):
         # Function override to ignore `dataset_id`, not need in learning; Just need to pass value for evaluation
-        # if torch.any(kwargs['input_ids'] == self.tokenizer.encode(self.tokenizer.ques_sep_token)[0]):
-        # pprint_gpt2_input(self.tokenizer, d={**kwargs, **dict(dataset_id=dataset_id)})
-        # exit(1)
         return super().forward(**kwargs)
 
     @classmethod
@@ -430,10 +427,6 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
             position_ids.masked_fill_(attention_mask == 0, 1)
             if past:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
-        # ========================== Begin of modified ==========================
-        # else:  # Basically, keep the position ids
-        #     position_ids = None
-        # ========================== End of modified ==========================
 
         return {
             "input_ids": input_ids,
@@ -686,8 +679,8 @@ def get_all_setup(
             return result
         tr_map_func = vl_map_func = ts_map_func = group_texts
     else:
+        # Gradient checkpointing still needed - otherwise doesn't fit in 44G GPU
         save_gpu_mem = 'arc-ts' not in get_hostname()
-        # save_gpu_mem = True  # Gradient checkpointing still needed - otherwise doesn't fit in 44G GPU
         model, tokenizer, data_collator_ = get_model_n_tokenizer(model_name, form=form, save_gpu_memory=save_gpu_mem)
         _md_nm = None if form == 'explicit' else model_name  # cos the filesystem path is too long
         dir_nm = map_model_dir_nm(
@@ -742,16 +735,11 @@ def plot_dataset_token_length_stats(domain: str = 'in'):
             dataset_name=[did2nm[i] for i in tokenized['dataset_id']]
         )
     dset_tr, dset_vl = get_dataset(
-        dataset_name=f'UTCD-{domain}',
-        map_func=map_func, remove_columns=['text', 'labels'],
-        # n_sample=1024*16,
-        # random_seed=77,
-        fast=True
+        dataset_name=f'UTCD-{domain}', map_func=map_func, remove_columns=['text', 'labels'], fast=True
     )
     # discard training set for out-of-domain
     dset = datasets.concatenate_datasets([dset_tr, dset_vl]) if domain == 'in' else dset_tr
     df = pd.DataFrame(dset[:])
-    mic(df)
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 9))
     args_bar = dict(kde=True, kde_kws=dict(bw_adjust=0.5, gridsize=2048))
@@ -780,60 +768,27 @@ def plot_dataset_token_length_stats(domain: str = 'in'):
 
 
 def load_trained(
-        form: str = 'vanilla', epoch: int = 3, normalize_aspect: bool = False, dir_name: str = None
+        form: str = 'vanilla', epoch: int = 3, normalize_aspect: bool = False, model_name_or_path: str = None
 ) -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokenizer, str]:
     ca.check_mismatch('GPT2 Training Strategy', form, ['vanilla', 'implicit', 'explicit'])
 
     d_log = dict(form=form, epoch=epoch, normalize_aspect=normalize_aspect)
     logger.info(f'Loading model with {pl.i(d_log)}... ')
-    tokenizer_name = 'gpt2'
-    if dir_name:
-        dir_nm = dir_name
-    else:
-        if normalize_aspect:
-            assert epoch in [3, 5, 8]
-            if epoch == 3:
-                if form == 'vanilla':
-                    dir_nm = '2022-06-10_11-36-47_NVIDIA-GPT2-gpt2-medium'
-                elif form == 'implicit':
-                    dir_nm = '2022-06-12_17-11-17_NVIDIA-GPT2-gpt2-medium-implicit-aspect-norm'
-                else:
-                    assert form == 'explicit'
-                    dir_nm = '2022-06-13_19-09-32_NVIDIA-GPT2-explicit-aspect-norm'
-            elif epoch == 5:
-                if form == 'vanilla':
-                    dir_nm = '2022-06-19_13-08-17_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'
-                elif form == 'implicit':
-                    dir_nm = '2022-06-19_13-09-36_NVIDIA-GPT2-gpt2-medium-implicit-aspect-norm'
-                else:
-                    raise NotImplementedError('TODO')
-            else:  # 8 epoch, model w/ best eval loss
-                if form == 'vanilla':
-                    # dir_nm = '2022-10-11_23-44-51_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'  # warmup 0.01
-                    dir_nm = '2022-10-14_07-45-31_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'  # warmup 0.1
-                else:
-                    raise NotImplementedError('TODO')
-            dir_nm = dir_name or dir_nm
+    if model_name_or_path:
+        path = os_join(get_base_path(), u.proj_dir, u.model_dir, model_name_or_path, 'trained')
+        if os.path.exists(path):
+            md_nm = path
         else:
-            assert epoch in [2, 3]
-            if not hasattr(load_trained, 'epoch2path'):
-                load_trained.epoch2path = {
-                    # 2: os_join('2022-03-04 21-33-12', 'checkpoint-37066'),
-                    # 3: os_join('2022-03-04 21-33-12', 'checkpoint-55599'),
-                    3: os_join('2022-04-02_11-51-19', 'checkpoint-51390'),
-                }
-            dir_nm = load_trained.epoch2path[epoch]
-    if normalize_aspect:
-        path = os_join(get_base_path(), u.proj_dir, u.model_dir, dir_nm, 'trained')
+            md_nm = model_name_or_path
     else:
-        path = os_join(BASE_PATH, PROJ_DIR, 'trained-models', 'gpt2-nvidia', dir_nm)
-    if form != 'vanilla':  # TODO: all models should have tokenizers saved eventually
-        tokenizer_name = path
-    logger.info(f'Loading model from {pl.i(path)}... ')
-    model = ZsGPT2LMHeadModel.from_pretrained(path, is_zs_gpt2=True)  # with caching
+        raise NotImplementedError('For obsolete local models')
+        md_nm = os_join(get_base_path(), u.proj_dir, u.model_dir, dir_nm, 'trained')
+
+    logger.info(f'Loading model from {pl.i(md_nm)}... ')
+    model = ZsGPT2LMHeadModel.from_pretrained(md_nm, is_zs_gpt2=True)  # with caching
     tokenizer_args = dict(form=form, use_fast=True, model_max_length=model.config.n_ctx)
-    tokenizer = ZsGPT2Tokenizer.from_pretrained(tokenizer_name, **tokenizer_args)
-    return model, tokenizer,  dir_nm
+    tokenizer = ZsGPT2Tokenizer.from_pretrained(md_nm, **tokenizer_args)
+    return model, tokenizer, md_nm
 
 
 def evaluate(
@@ -893,7 +848,6 @@ def evaluate(
             dataset_name=dnm_, splits='test',
             map_func=dict(test=Tokenize(tokenizer, dataset_name=dnm_, split='test', mode='inference')),
             remove_columns='text', n_sample=None, from_disk=True,  # keeps the `labels`
-            # pbar=True
         )['test']
         label_embeds = None
         if embed_sim:
@@ -966,8 +920,6 @@ def evaluate(
                     for a in answers:
                         answs.extend(a.split(tokenizer.boa_token))
                     answers = answs
-                    mic(answs)
-                    # raise NotImplementedError
 
                 ids_pred: List[int] = [lb2id[a.lower()] for a in answers]
                 assert len(ids_pred) >= 1  # sanity check
@@ -1028,18 +980,44 @@ def evaluate(
 
 def gpt2_inference(text: str, label_options: List[str]) -> str:
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = load_trained(epoch=3).to(device)
-    model_size = model.config.max_length = model.config.n_ctx
+    model, tokenizer, _ = load_trained(epoch=3)
+    model = model.to(device)
     model.config.pad_token_id = model.config.eos_token_id
     model.eval()
-    tkzer = ZsGPT2Tokenizer.from_pretrained('gpt2', use_fast=True, model_max_length=model_size)
 
     # 'dataset_name` just so that it passes, irrelevant
-    tokenize_fn = Tokenize(tkzer, dataset_name='UTCD', mode='inference-sample')
+    tokenize_fn = Tokenize(tokenizer, dataset_name='UTCD', mode='inference-sample')
     inputs = tokenize_fn(dict(text=text, dataset_id=-1, labels=-1, label_options=label_options))
     inputs = {k: torch.tensor(v).to(device).unsqueeze(0) for k, v in inputs.items()}  # add dummy batch dim
     outputs = model.generate(**inputs)
-    return tkzer.batch_decode(outputs, skip_special_tokens=False)
+    return tokenizer.batch_decode(outputs, skip_special_tokens=False)
+
+
+def parse_args():
+    modes = ['vanilla', 'implicit', 'explicit']
+
+    parser = ArgumentParser()
+    subparser = parser.add_subparsers(dest='command')
+    parser_train = subparser.add_parser('train')
+    parser_test = subparser.add_parser('test')
+
+    parser_train.add_argument('--mode', type=str, choices=modes, default='vanilla')
+    parser_train.add_argument('--normalize_aspect', type=bool, default=True)
+    parser_train.add_argument('--learning_rate', type=float, default=2e-5)
+    parser_train.add_argument('--batch_size', type=int, default=4)
+    parser_train.add_argument('--gradient_accumulation_steps', type=int, default=32)
+    parser_train.add_argument('--epochs', type=int, default=8)
+    parser_train.add_argument('--ddp', type=int, default=None)
+    parser_train.add_argument('--init_model_name_or_path', type=str, default=HF_MODEL_NAME)
+    parser_train.add_argument('--output_dir', type=str, default=None)
+
+    # set test arguments
+    parser_test.add_argument('--domain', type=str, choices=['in', 'out'], required=True)
+    parser_test.add_argument('--mode', type=str, choices=modes, default='vanilla')
+    parser_test.add_argument('--batch_size', type=int, default=32)
+    parser_test.add_argument('--model_name_or_path', type=str, required=True)
+
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
@@ -1047,71 +1025,62 @@ if __name__ == '__main__':
 
     seed = sconfig('random-seed')
 
-    NORMALIZE_ASPECT = True
-
-    def train():
+    def train(
+            mode: str = 'vanilla', normalize_aspect: bool = True,
+            learning_rate: float = 2e-5, batch_size: int = 4, gradient_accumulation_steps: int = 32, epochs: int = 8,
+            ddp: int = None,
+            init_model_name_or_path: str = HF_MODEL_NAME, output_dir: str = None
+    ):
         transformers.set_seed(seed)
         dnm = 'UTCD-in'
-        # md_nm = 'debug'
-        md_nm = 'gpt2-medium'
-        mic(dnm, md_nm)
+        md_nm = init_model_name_or_path
+        mic(dnm, md_nm, mode)
 
-        # form = 'vanilla'
-        # form = 'implicit'
-        form = 'explicit'
-        mic(form)
-        if form == 'explicit':
-            dir_nm = '2022-11-27_17-39-06_Aspect-Pretrain-NVIDIA-GPT2_{md=exp, na=T}_{a=2e-05}'
-            md_nm = os_join(get_base_path(), u.proj_dir, u.model_dir, dir_nm, 'trained')
-            mic(os.listdir(md_nm))
-            # exit(1)
+        if mode == 'explicit':
+            assert init_model_name_or_path != HF_MODEL_NAME
+        if init_model_name_or_path != HF_MODEL_NAME:
+            path = os_join(get_base_path(), u.proj_dir, u.model_dir, init_model_name_or_path, 'trained')
+            if os.path.exists(path):
+                md_nm = path
+                logger.info(f'Loading model from local path{pl.i(path)}... ')
 
-        # n = 32
-        # n = 128
-        # n = 256
-        n = None
-
-        n_ep = 8
-
-        lr = 4e-5
-        ddp = False
-        # ddp = 4
+        lr, bsz, gas, n_ep = learning_rate, batch_size, gradient_accumulation_steps, epochs
+        output_dir = output_dir or f'{{a={lr}}}'
 
         dataset_args = dict(pbar=False)
-        if NORMALIZE_ASPECT:
+        if normalize_aspect:
             dataset_args['normalize_aspect'] = seed
 
         path = map_model_output_path(
-            model_name=MODEL_NAME.replace(' ', '-'), mode=form,
-            sampling=None, normalize_aspect=NORMALIZE_ASPECT, output_dir=f'{{a={lr}}}'
+            model_name=MODEL_NAME.replace(' ', '-'), mode=mode,
+            sampling=None, normalize_aspect=normalize_aspect, output_dir=output_dir
         )
         train_args = dict(  # Distribute among GPUs & fit in memory; Effectively batch size 128 as in paper
             output_dir=path,
             num_train_epochs=n_ep,
             learning_rate=lr,
             warmup_ratio=1e-1,
-            per_device_train_batch_size=4,
-            per_device_eval_batch_size=8,
-            gradient_accumulation_steps=32,
+            per_device_train_batch_size=bsz,
+            per_device_eval_batch_size=bsz,
+            gradient_accumulation_steps=gas,
             dataloader_num_workers=4
         )
-        if NORMALIZE_ASPECT:
+        if normalize_aspect:
             train_args.update(dict(
                 load_best_model_at_end=True,
                 metric_for_best_model='eval_loss',
                 greater_is_better=False
             ))
 
-        mic(n, n_ep, lr, NORMALIZE_ASPECT, ddp)
+        mic(n_ep, lr, normalize_aspect, ddp)
         mic(train_args)
         model, tokenizer, trainer = get_all_setup(
-            model_name=md_nm, dataset_name=dnm, form=form, do_eval=True, custom_logging=True, n_sample=n,
+            model_name=md_nm, dataset_name=dnm, form=mode, do_eval=True, custom_logging=True,
             random_seed=seed,
             train_args=train_args, dataset_args=dataset_args, trainer_args=dict(compute_cls_acc=True),
             is_ddp=ddp
         )
         save_path = os_join(trainer.args.output_dir, 'trained')
-        mic(save_path)
         trainer.train()
 
         trainer.save_model(save_path)
@@ -1119,27 +1088,19 @@ if __name__ == '__main__':
         os.listdir(save_path)
     # train()
 
-    def run_eval():
+    def run_eval(domain: str = 'in', mode: str = 'vanilla', batch_size: int = 32, model_name_or_path: str = None):
         transformers.set_seed(seed)  # cos explicit 3 epoch doesn't generate BOA token...
-        # def profile_evaluation():
-        #     profile_runtime(lambda: evaluate(domain='in', batch_size=48), sleep=2)
-        # # profile_evaluation()
 
-        # dom = 'in'
-        dom = 'out'
-        # form = 'vanilla'
-        # form = 'implicit'
-        form = 'explicit'
         # n_ep = 3
         # n_ep = 5
         n_ep = 8
 
-        if form == 'vanilla':
+        if mode == 'vanilla':
             # dnm = '2022-11-29_12-12-56_NVIDIA-GPT2_{md=van, na=T}_{a=1e-05}'
             # dnm = '2022-11-29_19-15-44_NVIDIA-GPT2_{md=van, na=T}_{a=2e-05}'
             dnm = '2022-11-29_19-37-13_NVIDIA-GPT2_{md=van, na=T}_{a=3e-05}'
             # dnm = '2022-11-29_19-43-32_NVIDIA-GPT2_{md=van, na=T}_{a=4e-05}'
-        elif form == 'implicit':
+        elif mode == 'implicit':
             # dnm = '2022-12-03_10-43-47_NVIDIA-GPT2_{md=imp, na=T}_{a=1e-05}'
             # dnm = '2022-12-03_14-47-52_NVIDIA-GPT2_{md=imp, na=T}_{a=2e-05}'
             # dnm = '2022-12-03_15-03-14_NVIDIA-GPT2_{md=imp, na=T}_{a=3e-05}'
@@ -1149,12 +1110,11 @@ if __name__ == '__main__':
             # dnm = '2022-12-05_16-25-57_NVIDIA-GPT2_{md=exp, na=T}_{a=2e-05}'
             # dnm = '2022-12-05_16-52-24_NVIDIA-GPT2_{md=exp, na=T}_{a=3e-05}'
             dnm = '2022-12-05_17-12-33_NVIDIA-GPT2_{md=exp, na=T}_{a=4e-05}'
-        md_args = dict(normalize_aspect=NORMALIZE_ASPECT, epoch=n_ep, dir_name=dnm)
+        md_args = dict(epoch=n_ep, model_name_or_path=model_name_or_path or dnm)
 
-        mic(NORMALIZE_ASPECT)
-        mic(dom, form, dnm)
-        evaluate(domain=dom, batch_size=48, form=form, load_model_args=md_args, embed_sim=True)
-    run_eval()
+        mic(domain, mode, dnm)
+        evaluate(domain=domain, batch_size=batch_size, form=mode, load_model_args=md_args, embed_sim=True)
+    # run_eval()
 
     def sanity_check_trained_generate():
         text = 'hello world'
@@ -1164,3 +1124,21 @@ if __name__ == '__main__':
     # sanity_check_trained_generate()
 
     # plot_dataset_token_length_stats(domain='in')
+
+    def command_prompt():
+        args = parse_args()
+        cmd = args.command
+        if cmd == 'train':
+            train(
+                mode=args.mode, normalize_aspect=args.normalize_aspect,
+                learning_rate=args.learning_rate, batch_size=args.batch_size,
+                gradient_accumulation_steps=args.gradient_accumulation_steps, epochs=args.epochs,
+                ddp=args.ddp, init_model_name_or_path=args.init_model_name_or_path, output_dir=args.output_dir
+            )
+        else:
+            assert cmd == 'test'  # sanity check
+            run_eval(
+                domain=args.domain, mode=args.mode, batch_size=args.batch_size,
+                model_name_or_path=args.model_name_or_path
+            )
+    command_prompt()

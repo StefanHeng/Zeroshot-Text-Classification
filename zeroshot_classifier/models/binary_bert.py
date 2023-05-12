@@ -3,7 +3,6 @@ import pickle
 import random
 from typing import List, Dict
 from os.path import join as os_join
-from argparse import ArgumentParser
 
 import torch
 import torch.nn.functional as F
@@ -14,40 +13,11 @@ from stefutil import *
 from zeroshot_classifier.util import *
 from zeroshot_classifier.util.load_data import get_datasets, binary_cls_format
 import zeroshot_classifier.util.utcd as utcd_util
-from zeroshot_classifier.models.architecture import load_sliced_binary_bert, BinaryBertCrossEncoder
+from zeroshot_classifier.models.architecture import BinaryBertCrossEncoder
+from zeroshot_classifier.models._bert_based_models import HF_MODEL_NAME, parse_args
 
 
 MODEL_NAME = 'Binary BERT'
-HF_MODEL_NAME = 'bert-base-uncased'
-
-
-def parse_args():
-    modes = sconfig('training.strategies')
-
-    parser = ArgumentParser()
-    subparser = parser.add_subparsers(dest='command')
-    parser_train = subparser.add_parser('train')
-    parser_test = subparser.add_parser('test')
-
-    # set train arguments
-    parser_train.add_argument('--max_sequence_length', type=int, default=512)
-    parser_train.add_argument('--output', type=str, default=None)
-    parser_train.add_argument('--output_dir', type=str, default=None)
-    parser_train.add_argument('--sampling', type=str, choices=['rand', 'vect'], default='rand')
-    # model to initialize weights from, intended for loading weights from local explicit training
-    parser_train.add_argument('--model_init', type=str, default=HF_MODEL_NAME)
-    parser_train.add_argument('--mode', type=str, choices=modes, default='vanilla')
-    parser_train.add_argument('--learning_rate', type=float, default=2e-5)
-    parser_train.add_argument('--batch_size', type=int, default=16)
-    parser_train.add_argument('--epochs', type=int, default=3)
-
-    # set test arguments
-    parser_test.add_argument('--domain', type=str, choices=['in', 'out'], required=True)
-    parser_test.add_argument('--mode', type=str, choices=modes, default='vanilla')
-    parser_test.add_argument('--batch_size', type=int, default=32)  # #of texts to do inference in a single forward pass
-    parser_test.add_argument('--model_dir_nm', type=str, required=True)
-    
-    return parser.parse_args()
 
 
 if __name__ == '__main__':
@@ -58,17 +28,6 @@ if __name__ == '__main__':
 
     seed = sconfig('random-seed')
 
-    # INTENT_ONLY = True
-    INTENT_ONLY = False
-    # NORMALIZE_ASPECT = False
-    NORMALIZE_ASPECT = True
-    if INTENT_ONLY:
-        def filt(d, dom):
-            return d['domain'] == dom and d['aspect'] == 'intent'
-    else:
-        def filt(d, dom):
-            return d['domain'] == dom
-
     args = parse_args()
     cmd = args.command
     log_nm = f'{MODEL_NAME} {args.command.capitalize()}'
@@ -76,31 +35,26 @@ if __name__ == '__main__':
 
     if cmd == 'train':
         output_path, output_dir, sampling, mode = args.output, args.output_dir, args.sampling, args.mode
+        normalize_aspect = args.normalize_aspect
         lr, bsz, n_ep = args.learning_rate, args.batch_size, args.epochs
-        model_init, seq_len = args.model_init, args.max_sequence_length
-
-        n = None
-        # n = 64
+        init_model_name_or_path = args.init_model_name_or_path
 
         # best_metric = 'accuracy'
         best_metric = 'loss'
 
         output_path = map_model_output_path(
             model_name=MODEL_NAME.replace(' ', '-'), output_path=output_path, output_dir=output_dir,
-            mode=mode, sampling=sampling, normalize_aspect=NORMALIZE_ASPECT
+            mode=mode, sampling=sampling, normalize_aspect=normalize_aspect
         )
         logger_fl = get_logger(log_nm, kind='file-write', file_path=os_join(output_path, 'training.log'))
 
-        dset_args = dict(normalize_aspect=seed) if NORMALIZE_ASPECT else dict()
-        data = get_datasets(domain='in', n_sample=n, **dset_args)
-        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if filt(d_dset, 'in')]
+        dset_args = dict(normalize_aspect=seed) if normalize_aspect else dict()
+        data = get_datasets(domain='in', **dset_args)
+        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == 'in']
         logger.info(f'Processing datasets {pl.i(dataset_names)} for training... ')
         logger_fl.info(f'Processing datasets {pl.nc(dataset_names)} for training... ')
 
-        train = []
-        val = []
-        test = []
-
+        train, val, test = [], [], []
         it = tqdm(dataset_names, desc=f'Formatting into Binary CLS w/ {pl.i(dict(sampling=sampling, mode=mode))}')
         for dataset_name in it:
             dset = data[dataset_name]
@@ -109,31 +63,31 @@ if __name__ == '__main__':
                 it.set_postfix(dnm=f'{pl.i(dataset_name)}-{pl.i(split)}')
                 ds.extend(binary_cls_format(dset, **args, split=split))
 
-        d_log = dict(model_init=model_init)
+        d_log = dict(init_model_name_or_path=init_model_name_or_path)
+        md_nm = init_model_name_or_path
         if mode == 'explicit':
-            assert model_init != HF_MODEL_NAME  # sanity check
-        if model_init != HF_MODEL_NAME:
+            assert init_model_name_or_path != HF_MODEL_NAME  # sanity check
+        if init_model_name_or_path != HF_MODEL_NAME:
             # loading from explicit pre-training local weights,
             # the classification head would be ignored for classifying 3 classes
-            model_init = os_join(get_base_path(), u.proj_dir, u.model_dir, model_init)
-            d_log['files'] = os.listdir(model_init)
+            path = os_join(get_base_path(), u.proj_dir, u.model_dir, init_model_name_or_path)
+            if os.path.exists(path):
+                md_nm = path
+                d_log['files'] = os.listdir(path)
         logger.info(f'Loading model with {pl.i(d_log)}...')
         logger_fl.info(f'Loading model with {pl.nc(d_log)}...')
-        model = BinaryBertCrossEncoder(model_init, num_labels=2, automodel_args=dict(ignore_mismatched_sizes=True))
-        if seq_len != 512:  # Intended for `bert-base-uncased` only; TODO: binary bert seems to support this already?
-            model.tokenizer, model.model = load_sliced_binary_bert(model_init, seq_len)
+        model = BinaryBertCrossEncoder(md_nm, num_labels=2, automodel_args=dict(ignore_mismatched_sizes=True))
 
-        spec_tok_arg = utcd_util.get_add_special_tokens_args(model.tokenizer, train_strategy=mode)
-        if spec_tok_arg:
-            logger.info(f'Adding special tokens {pl.i(spec_tok_arg)} to tokenizer... ')
-            logger_fl.info(f'Adding special tokens {pl.nc(spec_tok_arg)} to tokenizer... ')
-            model.tokenizer.add_special_tokens(special_tokens_dict=spec_tok_arg)
+        add_tok_arg = utcd_util.get_add_special_tokens_args(model.tokenizer, train_strategy=mode)
+        if add_tok_arg:
+            logger.info(f'Adding special tokens {pl.i(add_tok_arg)} to tokenizer... ')
+            logger_fl.info(f'Adding special tokens {pl.nc(add_tok_arg)} to tokenizer... ')
+            model.tokenizer.add_special_tokens(special_tokens_dict=add_tok_arg)
             model.model.resize_token_embeddings(len(model.tokenizer))
 
         transformers.logging.set_verbosity_error()  # disables `longest_first` warning
         random.seed(seed)
         random.shuffle(train)
-        # train, val = train[:128], train[:128]  # TODO: debugging
         train_dataloader = DataLoader(train, shuffle=True, batch_size=bsz)
         val_dataloader = DataLoader(val, shuffle=False, batch_size=bsz)
         warmup_steps = math.ceil(len(train_dataloader) * n_ep * 0.1)  # 10% of train data for warm-up
@@ -158,24 +112,26 @@ if __name__ == '__main__':
         )
     elif cmd == 'test':
         WITH_EVAL_LOSS = False
-        mode, domain, model_dir_nm, bsz = args.mode, args.domain, args.model_dir_nm, args.batch_size
+        mode, domain, model_name_or_path, bsz = args.mode, args.domain, args.model_name_or_path, args.batch_size
         split = 'test'
 
-        out_path = os_join(u.eval_path, model_dir_nm, domain2eval_dir_nm(domain))
+        out_path = os_join(u.eval_path, model_name_or_path, domain2eval_dir_nm(domain))
         os.makedirs(out_path, exist_ok=True)
 
         data = get_datasets(domain=domain)
 
-        model_path = os_join(get_base_path(), u.proj_dir, u.model_dir, model_dir_nm)
+        model_path = os_join(get_base_path(), u.proj_dir, u.model_dir, model_name_or_path)
+        if not os.path.exists(model_path):
+            model_path = model_name_or_path  # A huggingface model
         logger.info(f'Loading model from path {pl.i(model_path)}... ')
         model = BinaryBertCrossEncoder(model_path)  # load model
 
         logger = get_logger(f'{MODEL_NAME} Eval')
-        d_log = dict(mode=mode, domain=domain, batch_size=bsz, dir_nm=model_dir_nm)
+        d_log = dict(mode=mode, domain=domain, batch_size=bsz, model_name_or_path=model_name_or_path)
         logger.info(f'Evaluating Binary Bert with {pl.i(d_log)} and saving to {pl.i(out_path)}... ')
 
         eval_loss: Dict[str, np.array] = dict()  # a sense of how badly the model makes the prediction
-        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if filt(d_dset, domain)]
+        dataset_names = [dnm for dnm, d_dset in sconfig('UTCD.datasets').items() if d_dset['domain'] == domain]
 
         for dnm in dataset_names:  # loop through all datasets
             dset = data[dnm]

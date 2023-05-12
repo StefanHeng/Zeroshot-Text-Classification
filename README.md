@@ -4,24 +4,36 @@
 
 
 
+## Setup environment
 
-## Usage
-Python version `3.8.10`.
+OS: UNIX; Python version `3.8.10`; CUDA version `11.6`. 
+
+
+
+Create conda environment: 
+
+```bash
+conda create -n zs-cls python=3.8.10 pip
+```
+
+At project root directory, install python packages: 
 
 ```bash
 pip3 install -r requirements.txt
 ```
 
 
-### Train Baseline 
+
+### Train Baseline
+
 e.g. On GPT2 zero shot classification: 
 ```bash
 export PYTHONPATH=$PATHONPATH:`pwd`
 python3 zeroshot_classifier/baseline/gpt2.py
 ```
 
-
 ## Obsolete: Unified-Encoder
+
 Exploring a unified framework for potentially many NLP tasks as encoding operations
 
 
