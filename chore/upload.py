@@ -90,32 +90,52 @@ if __name__ == '__main__':
 
     def upload_models():
         from zeroshot_classifier.models.architecture import BinaryBertCrossEncoder
-        from transformers import BertForSequenceClassification, TFBertForSequenceClassification
 
-        # md_nm = '06.03.22_binary-bert-asp-norm-vanilla'
-        # md_nm = '06.03.22_binary-bert-asp-norm-implicit-sep'
-        md_nm = '06.04.22_binary-bert-explicit-finetune'
+        from transformers import BertForSequenceClassification, TFBertForSequenceClassification
+        from sentence_transformers import SentenceTransformer
+
+        # model_type = 'binary-bert'
+        model_type = 'bi-encoder'
+
+        if model_type == 'binary-bert':
+            # md_nm = '06.03.22_binary-bert-asp-norm-vanilla'
+            # md_nm = '06.03.22_binary-bert-asp-norm-implicit-sep'
+            md_nm = '06.04.22_binary-bert-explicit-finetune'
+        else:
+            assert model_type == 'bi-encoder'
+            # md_nm = 'bi-encoder, vanilla, asp-norm, 06.08.22'
+            # md_nm = 'bi-encoder, implicit-sep, asp-norm, 06.09.22'
+            md_nm = 'bi-encoder, explicit, asp-norm, 06.09.22'
         model_path = os_join(u.base_path, 'models-upload', md_nm)
         mic(model_path)
         assert os.path.exists(model_path)  # sanity check
         # mic(os.listdir(model_path))
 
-        model = BinaryBertCrossEncoder(model_name=model_path)
-        model, tokenizer = model.model, model.tokenizer
-        assert isinstance(model, BertForSequenceClassification)  # sanity check
-        model_tf = TFBertForSequenceClassification.from_pretrained(model_path, from_pt=True)
-        mic(type(model), type(model_tf), tokenizer)
+        if 'vanilla' in md_nm:
+            strat = 'vanilla'
+        elif 'implicit-sep' in md_nm:
+            strat = 'implicit'
+        else:
+            assert 'explicit' in md_nm
+            strat = 'explicit'
+        md_nm_hf = f'zero-shot-{strat}-{model_type}'
 
-        # md_nm_hf = 'zero-shot-vanilla-binary-bert'
-        # md_nm_hf = 'zero-shot-implicit-binary-bert'
-        md_nm_hf = 'zero-shot-explicit-binary-bert'
-        # `sentence-transformers` uses huggingface-hub 0.4.0, uploading to hub w/ org code different
-        repo_id = f'{org_nm}/{md_nm_hf}'
-        mic(repo_id)
-        # model.push_to_hub(repo_id)
-        # model_tf.push_to_hub(repo_id)
-        # tokenizer.push_to_hub(repo_id)
-        model.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
-        model_tf.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
-        tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+        if model_type == 'binary-bert':
+            model = BinaryBertCrossEncoder(model_name=model_path)
+            model, tokenizer = model.model, model.tokenizer
+            assert isinstance(model, BertForSequenceClassification)  # sanity check
+            model_tf = TFBertForSequenceClassification.from_pretrained(model_path, from_pt=True)
+            mic(type(model), type(model_tf), tokenizer)
+
+            # `sentence-transformers` uses huggingface-hub 0.4.0, uploading to hub w/ org code different
+            model.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+            model_tf.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+            tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+        else:
+            model = SentenceTransformer(model_path)
+            mic(model)
+            # mic(model._modules)
+            # mic(model._first_module())
+            # raise NotImplementedError
+            mic(model.save_to_hub(repo_name=md_nm_hf, organization=org_nm))
     upload_models()

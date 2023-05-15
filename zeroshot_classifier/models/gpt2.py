@@ -45,6 +45,9 @@ MODEL_NAME = 'NVIDIA-GPT2'
 HF_MODEL_NAME = 'gpt2-medium'
 
 
+__all__ = ['ZsGPT2Tokenizer', 'ZsGPT2LMHeadModel']
+
+
 logger = get_logger(MODEL_NAME)
 
 
