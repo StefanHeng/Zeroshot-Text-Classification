@@ -88,32 +88,40 @@ if __name__ == '__main__':
 
     org_nm = 'claritylab'
 
-    def upload_models():
-        from zeroshot_classifier.models.architecture import BinaryBertCrossEncoder
+    def upload_model():
+        from zeroshot_classifier.models import BinaryBertCrossEncoder, ZsGPT2Tokenizer, ZsGPT2LMHeadModel
 
-        from transformers import BertForSequenceClassification, TFBertForSequenceClassification
         from sentence_transformers import SentenceTransformer
 
         # model_type = 'binary-bert'
-        model_type = 'bi-encoder'
+        # model_type = 'bi-encoder'
+        model_type = 'gpt2'
 
-        if model_type == 'binary-bert':
-            # md_nm = '06.03.22_binary-bert-asp-norm-vanilla'
-            # md_nm = '06.03.22_binary-bert-asp-norm-implicit-sep'
-            md_nm = '06.04.22_binary-bert-explicit-finetune'
+        model_base_path = os_join(u.base_path, 'models-upload')
+
+        if model_type == 'gpt2':
+            # md_nm = '2022-06-19_13-08-17_NVIDIA-GPT2-gpt2-medium-vanilla-aspect-norm'
+            # md_nm = '2022-06-19_13-09-36_NVIDIA-GPT2-gpt2-medium-implicit-aspect-norm'
+            md_nm = '2022-06-13_19-09-32_NVIDIA-GPT2-explicit-aspect-norm'
+            model_path = os_join(model_base_path, md_nm, R'trained')
         else:
-            assert model_type == 'bi-encoder'
-            # md_nm = 'bi-encoder, vanilla, asp-norm, 06.08.22'
-            # md_nm = 'bi-encoder, implicit-sep, asp-norm, 06.09.22'
-            md_nm = 'bi-encoder, explicit, asp-norm, 06.09.22'
-        model_path = os_join(u.base_path, 'models-upload', md_nm)
+            if model_type == 'binary-bert':
+                # md_nm = '06.03.22_binary-bert-asp-norm-vanilla'
+                # md_nm = '06.03.22_binary-bert-asp-norm-implicit-sep'
+                md_nm = '06.04.22_binary-bert-explicit-finetune'
+            else:
+                assert model_type == 'bi-encoder'
+                # md_nm = 'bi-encoder, vanilla, asp-norm, 06.08.22'
+                # md_nm = 'bi-encoder, implicit-sep, asp-norm, 06.09.22'
+                md_nm = 'bi-encoder, explicit, asp-norm, 06.09.22'
+            model_path = os_join(model_base_path, md_nm)
         mic(model_path)
         assert os.path.exists(model_path)  # sanity check
         # mic(os.listdir(model_path))
 
         if 'vanilla' in md_nm:
             strat = 'vanilla'
-        elif 'implicit-sep' in md_nm:
+        elif 'implicit' in md_nm:
             strat = 'implicit'
         else:
             assert 'explicit' in md_nm
@@ -123,19 +131,32 @@ if __name__ == '__main__':
         if model_type == 'binary-bert':
             model = BinaryBertCrossEncoder(model_name=model_path)
             model, tokenizer = model.model, model.tokenizer
-            assert isinstance(model, BertForSequenceClassification)  # sanity check
-            model_tf = TFBertForSequenceClassification.from_pretrained(model_path, from_pt=True)
-            mic(type(model), type(model_tf), tokenizer)
+            mic(type(model), tokenizer)
 
             # `sentence-transformers` uses huggingface-hub 0.4.0, uploading to hub w/ org code different
-            model.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
-            model_tf.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
-            tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
-        else:
+            mic(model.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm))
+            # tensorflow framework not supported for `CrossEncoder` in `sentence-transformers` don't support TF
+            mic(tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm))
+        elif model_type == 'bi-encoder':
             model = SentenceTransformer(model_path)
             mic(model)
             # mic(model._modules)
             # mic(model._first_module())
             # raise NotImplementedError
             mic(model.save_to_hub(repo_name=md_nm_hf, organization=org_nm))
-    upload_models()
+        else:
+            # tensorflow framework not supported for there's no `TFZsGPT2LMHeadModel`
+            assert model_type == 'gpt2'
+
+            model = ZsGPT2LMHeadModel.from_pretrained(model_path)
+            # have to pass `form` for correct tokenization
+            tokenizer = ZsGPT2Tokenizer.from_pretrained(model_path, form=strat)
+            mic(type(model), tokenizer)
+
+            # repo_id = f'{org_nm}/{md_nm_hf}'
+
+            model.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+            tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
+            # mic(model.push_to_hub(repo_id))
+            # mic(tokenizer.push_to_hub(repo_id))
+    upload_model()

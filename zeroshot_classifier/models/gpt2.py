@@ -117,7 +117,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             # TODO: when re-loaded, PAD token doesn't seem to be added...
         else:
             spec_toks.append(utcd_util.EOT_TOKEN)  # SGD end of turn
-        ca.check_mismatch('GPT2 Training Strategy', form, ['vanilla', 'implicit', 'explicit'])
+        ca(gpt2_training_strategy=form)
         self.form = form
         self.did2aspect, aspect_sep_token = None, None
         if form == 'implicit':
@@ -204,7 +204,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 n_cls = len(descs)
                 # `label` is shared across all datasets, map to local label within dataset
                 if self.cache_utcd is None:
-                    path = os_join(utcd_util.get_base_path(), PROJ_DIR, DSET_DIR, 'processed', dataset_name)
+                    path = os_join(utcd_util.get_base_path(), u.proj_dir, u.dset_dir, 'processed', dataset_name)
                     # cos `Sequential`; each split, the label is the same
                     self.cache_utcd = datasets.load_from_disk(path)[split].features['labels'].feature
                 # The ordering indicates int<=>str label mapping, i.e., index is int label,
@@ -384,7 +384,7 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
         return super().forward(**kwargs)
 
     @classmethod
-    def from_pretrained(cls, *args, is_zs_gpt2: bool = False, **kwargs):
+    def from_pretrained(cls, *args, is_zs_gpt2: bool = True, **kwargs):
         """
         :param is_zs_gpt2: If True, loads a local `ZsGPT2LMHeadModel`; otherwise, expects a GPT2 model
         """
@@ -773,7 +773,7 @@ def plot_dataset_token_length_stats(domain: str = 'in'):
 def load_trained(
         form: str = 'vanilla', epoch: int = 3, normalize_aspect: bool = False, model_name_or_path: str = None
 ) -> Tuple[ZsGPT2LMHeadModel, ZsGPT2Tokenizer, str]:
-    ca.check_mismatch('GPT2 Training Strategy', form, ['vanilla', 'implicit', 'explicit'])
+    ca(gpt2_training_strategy=form)
 
     d_log = dict(form=form, epoch=epoch, normalize_aspect=normalize_aspect)
     logger.info(f'Loading model with {pl.i(d_log)}... ')

@@ -223,6 +223,10 @@ config_dict = {
                 'implicit-on-text-encode-sep',
                 'explicit'
             ]
+        ),
+        dict(
+            display_name='GPT2 Training Strategy', attr_name='gpt2_training_strategy',
+            accepted_values=['vanilla', 'implicit', 'explicit']
         )
     ]
 }
