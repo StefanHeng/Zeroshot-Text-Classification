@@ -7,6 +7,8 @@ import glob
 import os.path
 from os.path import join as os_join
 
+from zeroshot_classifier.models import BinaryBertCrossEncoder, ZsGPT2Tokenizer, ZsGPT2LMHeadModel
+from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
 
 from stefutil import *
@@ -89,10 +91,6 @@ if __name__ == '__main__':
     org_nm = 'claritylab'
 
     def upload_model():
-        from zeroshot_classifier.models import BinaryBertCrossEncoder, ZsGPT2Tokenizer, ZsGPT2LMHeadModel
-
-        from sentence_transformers import SentenceTransformer
-
         # model_type = 'binary-bert'
         # model_type = 'bi-encoder'
         model_type = 'gpt2'
@@ -159,4 +157,71 @@ if __name__ == '__main__':
             tokenizer.push_to_hub(repo_path_or_name=md_nm_hf, organization=org_nm)
             # mic(model.push_to_hub(repo_id))
             # mic(tokenizer.push_to_hub(repo_id))
-    upload_model()
+    # upload_model()
+
+    def check_uploaded_binary_bert():
+        from transformers import AutoTokenizer
+
+        model_kind = 'binary-bert'
+        # strat = 'vanilla'
+        strat = 'implicit'
+        # strat = 'explicit'
+        md_nm = f'zero-shot-{strat}-{model_kind}'
+        md_nm = f'{org_nm}/{md_nm}'
+        mic(md_nm)
+        model = BinaryBertCrossEncoder(model_name=md_nm)
+        tokenizer = AutoTokenizer.from_pretrained(md_nm)
+        mic(type(model), type(tokenizer))
+
+        # dnm = 'emotion'
+        dnm = 'snips'
+        d_dset = sconfig(f'UTCD.datasets.{dnm}')
+        aspect = d_dset['aspect']
+        # mic(aspect)
+        input_tpl = TrainStrategy2PairMap(train_strategy=strat)(aspect)
+        # text = 'i feel like reds and purples are just so rich and kind of perfect'  # in-domain `emotion`
+        text = "I'd like to have this track onto my Classical Relaxations playlist."  # out-of-domain `SNIPS`
+        labels = get(d_dset, 'splits.test.labels')
+        # mic(labels)
+
+        query = input_tpl(text, labels)
+        mic(query)
+
+        logits = model.predict(query, apply_softmax=True)
+        mic(logits)
+    # check_uploaded_binary_bert()
+
+    def check_uploaded_bi_encoder():
+        from sentence_transformers import util as sbert_util
+        text = "I'd like to have this track onto my Classical Relaxations playlist."
+        dnm = 'snips'
+        d_dset = sconfig(f'UTCD.datasets.{dnm}')
+        aspect = d_dset['aspect']
+
+        # strat = 'vanilla'
+        # strat = 'implicit'
+        strat = 'explicit'
+        model = SentenceTransformer(model_name_or_path=f'claritylab/zero-shot-{strat}-bi-encoder')
+        labels = get(d_dset, 'splits.test.labels')
+
+        mode2map = TrainStrategy2PairMap(train_strategy=strat)
+        text = [mode2map.map_text(text, aspect=aspect)]
+        labels = [mode2map.map_label(lb, aspect=aspect) for lb in labels]
+
+        text_embed = model.encode(text)
+        label_embeds = model.encode(labels)
+        scores = [sbert_util.cos_sim(text_embed, lb_embed).item() for lb_embed in label_embeds]
+        mic(labels, scores)
+    check_uploaded_bi_encoder()
+
+    def check_upload_gpt2():
+        md_nm = 'gpt2'
+        strat = 'vanilla'
+        # strat = 'implicit'
+        # strat = 'explicit'
+        md_nm = f'{org_nm}/zero-shot-{md_nm}-{strat}'
+
+        model = ZsGPT2LMHeadModel.from_pretrained(md_nm)
+        tokenizer = ZsGPT2Tokenizer.from_pretrained(md_nm, form=strat)
+
+

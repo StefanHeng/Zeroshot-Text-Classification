@@ -100,7 +100,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 )
             return super().__getitem__(key)
 
-    def __init__(self, form: str = 'vanilla', **kwargs):
+    def __init__(self, form: str = 'vanilla', verbose: bool = False, **kwargs):
         """
         :param form: One of [`vanilla`, `implicit`, `explicit`]
             See `binary_bert::modes`
@@ -142,9 +142,11 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
 
         self.warned_desc = set()  # Warning for each dataset happens once    @property
 
+        self.verbose = verbose
         self.logger = get_logger(self.__class__.__qualname__)
-        d_log = dict(form=form, added_vocab=list(self.get_added_vocab().keys()), vocab_size=self.vocab_size)
-        self.logger.info(f'{pl.i(self.__class__.__qualname__)} initialized with {pl.i(d_log)}')
+        if verbose:
+            d_log = dict(form=form, added_vocab=list(self.get_added_vocab().keys()), vocab_size=self.vocab_size)
+            self.logger.info(f'{pl.i(self.__class__.__qualname__)} initialized with {pl.i(d_log)}')
 
     @property
     def max_len_single_sentence(self) -> int:
@@ -249,6 +251,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ln_q, ln_t, ln_a = len(ids_ques), len(ids_text), len(ids_answ)
 
             if mode == 'inference':
+                assert dset_nm is not None  # sanity check not `inference-sample`
                 # If text sample is so long that we need to truncate, leave room for one label only
                 ln_cont = (1+ln_q+1) + (1+ln_t+1) + 1  # for `pref_answ`
                 max_label_id_length = self.cache[dset_nm, split]['max_label_id_length']
@@ -285,7 +288,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             tids = [self.enc_spec(self.question_type_token)] * n_ques + \
                    [self.enc_spec(self.text_type_token)] * n_text + \
                    [self.enc_spec(self.answer_type_token)] * n_answ
-            if mode == 'inference':
+            if mode in ['inference', 'inference-sample']:
                 ids, tids = ids[:-(n_answ-1)], tids[:-(n_answ-1)]
                 assert len(ids) == (n_ques+n_text+1)  # sanity check
             msks = [1] * len(ids)  # Encode ids are attended for CLM
@@ -310,7 +313,8 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             out = {k: (pad(ints, k) if mode == 'train' else ints) for k, ints in ((
                 ('input_ids', ids), ('attention_mask', msks), ('token_type_ids', tids), ('position_ids', pids)
             ))}
-            out['dataset_id'] = dataset_id  # For computing zero-shot classification accuracy
+            if dataset_id is not None:
+                out['dataset_id'] = dataset_id  # For computing zero-shot classification accuracy
             if mode == 'stats':  # the number of tokens for just the text part
                 out['ids_text'] = ids_text
             return out
@@ -327,7 +331,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ))]
             return BatchEncoding({k: [d[k] for d in ds] for k in ds[0]})  # Stack all the ids
         else:
-            return BatchEncoding(call_single(0, *[samples[k] for k in keys_]))
+            return BatchEncoding(call_single(0, *[samples.get(k, None) for k in keys_]))
 
 
 class ZsGPT2Model(GPT2Model):
@@ -431,17 +435,27 @@ class ZsGPT2LMHeadModel(GPT2LMHeadModel):
             if past:
                 position_ids = position_ids[:, -1].unsqueeze(-1)
 
-        return {
+        # ========================== Begin of modified ==========================
+        # return {
+        #     "input_ids": input_ids,
+        #     "past_key_values": past,
+        #     "use_cache": kwargs.get("use_cache"),
+        #     "position_ids": position_ids,
+        #     "attention_mask": attention_mask,
+        #     "token_type_ids": token_type_ids,
+        # }
+        ret = {
             "input_ids": input_ids,
             "past_key_values": past,
             "use_cache": kwargs.get("use_cache"),
             "position_ids": position_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
-            # ========================== Begin of added ==========================
-            'dataset_id': kwargs['dataset_id']  # Should definitely exist
-            # ========================== End of added ==========================
         }
+        if 'dataset_id' in kwargs:  # only case it doesn't exist: `inference-sample` mode
+            ret['dataset_id'] = kwargs['dataset_id']
+        return ret
+        # ========================== End of modified ==========================
 
     def _update_model_kwargs_for_generation(
         self, outputs: ModelOutput, model_kwargs: Dict[str, Any], is_encoder_decoder: bool = False
