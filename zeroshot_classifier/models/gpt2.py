@@ -191,7 +191,8 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
         idxs_tpl = np.random.randint(len(self.templates), size=ln)
 
         def call_single(
-                i, dataset_id: int = None, text: str = None, labels: List[int] = None, label_options: List[str] = None
+                i, dataset_id: int = None, text: str = None, labels: List[int] = None, label_options: List[str] = None,
+                aspect: str = None
         ):
             dset_nm: str = None if mode == 'inference-sample' else sconfig('UTCD.dataset_id2name')[dataset_id]
             if mode == 'inference-sample':
@@ -243,7 +244,12 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
             ids_ques = self._call_paren(question, **kwargs)
             ids_text = self._call_paren(text, **kwargs)
             if self.form == 'implicit':
-                ids_asp = self._call_paren(self.did2aspect[dataset_id], **kwargs)
+                if dataset_id is None:
+                    assert aspect is not None
+                else:
+                    assert aspect is None
+                    aspect = self.did2aspect[dataset_id]
+                ids_asp = self._call_paren(aspect, **kwargs)
                 ids_text = ids_asp + [self.enc_spec(self.aspect_sep_token)] + ids_text
             id_sep = self.enc_spec(self.ques_sep_token)
             ids_answ = [self._call_paren(a, **kwargs) for a in answers]
@@ -319,7 +325,7 @@ class ZsGPT2Tokenizer(GPT2TokenizerFast):
                 out['ids_text'] = ids_text
             return out
         # See `zeroshot_classifier.util.util.py::process_utcd_dataset`
-        keys_ = ['dataset_id', 'text', 'labels', 'label_options']
+        keys_ = ['dataset_id', 'text', 'labels', 'label_options', 'aspect']
         if mode == 'inference-sample':
             assert not is_batched, f'Batched {pl.i("inference-sample")} not supported'
         else:

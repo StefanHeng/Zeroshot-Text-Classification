@@ -14,8 +14,8 @@ if __name__ == '__main__':
             'Search Screening Event'
         ]
         aspect = 'intent'
-        sep_token = '<|ASPECT-SEP|>'
-        text = f'{aspect} {sep_token} {text}'
+        aspect_sep_token = model.tokenizer.additional_special_tokens[0]
+        text = f'{aspect} {aspect_sep_token} {text}'
 
         query = [[text, lb] for lb in labels]
         logits = model.predict(query, apply_softmax=True)
@@ -25,16 +25,16 @@ if __name__ == '__main__':
     def bi_encoder_instr():
         from sentence_transformers import SentenceTransformer, util as sbert_util
 
-        model = SentenceTransformer(model_name_or_path='claritylab/zero-shot-explicit-bi-encoder')
+        model = SentenceTransformer(model_name_or_path='claritylab/zero-shot-implicit-bi-encoder')
 
         text = "I'd like to have this track onto my Classical Relaxations playlist."
         labels = [
             'Add To Playlist', 'Book Restaurant', 'Get Weather', 'Play Music', 'Rate Book', 'Search Creative Work',
             'Search Screening Event'
         ]
-        # aspect = 'intent'
-        # sep_token = '<|ASPECT-SEP|>'
-        # text = f'{aspect} {sep_token} {text}'
+        aspect = 'intent'
+        aspect_sep_token = model.tokenizer.additional_special_tokens[0]
+        text = f'{aspect} {aspect_sep_token} {text}'
 
         text_embed = model.encode(text)
         label_embeds = model.encode(labels)
@@ -47,7 +47,7 @@ if __name__ == '__main__':
         import torch
         from zeroshot_classifier.models import ZsGPT2Tokenizer, ZsGPT2LMHeadModel
 
-        training_strategy = 'vanilla'
+        training_strategy = 'explicit'
         model_name = f'claritylab/zero-shot-{training_strategy}-gpt2'
         model = ZsGPT2LMHeadModel.from_pretrained(model_name)
         tokenizer = ZsGPT2Tokenizer.from_pretrained(model_name, form=training_strategy)
@@ -57,10 +57,10 @@ if __name__ == '__main__':
             'Add To Playlist', 'Book Restaurant', 'Get Weather', 'Play Music', 'Rate Book', 'Search Creative Work',
             'Search Screening Event'
         ]
+        # aspect = 'intent'
 
-        inputs = tokenizer(
-            dict(text=text, label_options=labels), mode='inference-sample'
-        )
+        inputs = tokenizer(dict(text=text, label_options=labels), mode='inference-sample')
+        # inputs = tokenizer(dict(text=text, label_options=labels, aspect=aspect), mode='inference-sample')
         inputs = {k: torch.tensor(v).unsqueeze(0) for k, v in inputs.items()}
         outputs = model.generate(**inputs, max_length=128)
         decoded = tokenizer.batch_decode(outputs, skip_special_tokens=False)[0]
